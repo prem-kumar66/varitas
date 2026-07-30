@@ -1,0 +1,31 @@
+# Root gitignore for Veritas
+# Ignore Python virtual envs, bytecode, and local env files
+venv/
+backend/venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+veritas.db
+
+# Ignore environment files containing secrets
+.env
+.env.*
+backend/.env
+frontend/.env.local
+
+# Node / Next build outputs
+node_modules/
+.next/
+dist/
+
+# OS/editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log

@@ -1,0 +1,16 @@
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+websockets==13.1
+faster-whisper==1.0.3
+groq==0.11.0
+numpy==1.26.4
+python-dotenv==1.0.1
+pydantic==2.9.2
+# Real perplexity scoring via GPT-2 small
+transformers==4.45.2
+torch==2.4.1
+# PDF report generation
+reportlab==4.2.5
+# Persistence
+aiosqlite==0.20.0
