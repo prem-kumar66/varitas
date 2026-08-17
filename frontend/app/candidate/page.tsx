@@ -1,287 +1,614 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { Mic, MicOff, Radio, AlertCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Mic, MicOff, Radio, AlertTriangle, ShieldCheck, CheckCircle2,
+  Edit3, ArrowRight, RefreshCw, User, Hash, BookOpen, Clock, AlertCircle, Sparkles
+} from "lucide-react";
 
+const BACKEND_HTTP = process.env.NEXT_PUBLIC_BACKEND_HTTP || "http://localhost:8000";
 const BACKEND_WS = process.env.NEXT_PUBLIC_BACKEND_WS || "ws://localhost:8000";
 
+type Subject = { key: string; label?: string; name?: string; department: string; count?: number };
+type Question = { id?: number; question_text: string; reference_answer?: string; rubric_keywords?: string[]; max_marks?: number; time_limit_sec?: number };
+
 export default function CandidatePage() {
-  const [sessionId, setSessionId] = useState("demo-session");
+  const router = useRouter();
+  // Registration & Config State
+  const [studentName, setStudentName] = useState("");
+  const [rollNumber, setRollNumber] = useState("");
+  const [mobileNumber, setMobileNumber] = useState("");
+  const [academicYear, setAcademicYear] = useState("3rd Year");
+  const [selectedSubject, setSelectedSubject] = useState("computer_science");
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [mode, setMode] = useState<"oral" | "written">("written");
+
+  // Flow State
+  const [sessionStarted, setSessionStarted] = useState(false);
+  const [sessionId, setSessionId] = useState("");
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [currentQIndex, setCurrentQIndex] = useState(0);
+
+  // Written Mode State
+  const [writtenAnswer, setWrittenAnswer] = useState("");
+  const [pasteAttempts, setPasteAttempts] = useState(0);
+  const [pasteWarning, setPasteWarning] = useState(false);
+  const [startTime, setStartTime] = useState<number>(0);
+  const [isSubmittingWritten, setIsSubmittingWritten] = useState(false);
+
+  // Oral Mode State
   const [joined, setJoined] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [status, setStatus] = useState("Idle");
-  const [error, setError] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
 
+  // Evaluation & Results State
+  const [lastAnalysis, setLastAnalysis] = useState<any>(null);
+  const [answersHistory, setAnswersHistory] = useState<any[]>([]);
+
+  // Refs
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
 
+  // Fetch subjects on mount & read saved student login session
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    const savedAuth = localStorage.getItem("veritas_student_auth");
+    if (savedAuth) {
+      try {
+        const auth = JSON.parse(savedAuth);
+        if (auth.studentName) setStudentName(auth.studentName);
+        if (auth.rollNumber) setRollNumber(auth.rollNumber);
+        if (auth.mobileNumber) setMobileNumber(auth.mobileNumber);
+        if (auth.academicYear) setAcademicYear(auth.academicYear);
+        if (auth.mode) setMode(auth.mode);
+        if (auth.department) {
+          setSelectedSubject(auth.department);
+          setSubjectQuestions(auth.department);
+        }
+      } catch (e) {}
     }
-  }, [stream]);
 
-  const join = async () => {
+    fetch(`${BACKEND_HTTP}/api/academic/subjects`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.subjects && data.subjects.length > 0) {
+          setSubjects(data.subjects);
+          if (!savedAuth) {
+            setSubjectQuestions(data.subjects[0].key || "computer_science");
+          }
+        }
+      })
+      .catch((err) => console.error("Error fetching subjects:", err));
+  }, []);
+
+  const handleStudentLogout = () => {
+    localStorage.removeItem("veritas_student_auth");
+    router.push("/login/student");
+  };
+
+  const setSubjectQuestions = (subjKey: string) => {
+    setSelectedSubject(subjKey);
+    fetch(`${BACKEND_HTTP}/api/academic/questions?subject_key=${subjKey}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.questions && data.questions.length > 0) {
+          setQuestions(data.questions.map((q: any) => ({
+            id: q.id,
+            question_text: q.question_text || q.question,
+            reference_answer: q.reference_answer,
+            rubric_keywords: q.rubric_keywords_list || q.rubric_keywords,
+            max_marks: q.max_marks || 10,
+            time_limit_sec: q.time_limit_sec || 120,
+          })));
+        } else {
+          // Fallback templates
+          fetch(`${BACKEND_HTTP}/api/templates/${subjKey}`)
+            .then((r) => r.json())
+            .then((tmpl) => {
+              if (tmpl.questions) {
+                setQuestions(tmpl.questions.map((q: any) => typeof q === "string" ? { question_text: q } : q));
+              }
+            }).catch(() => {});
+        }
+      });
+  };
+
+  // Start Assessment Session
+  const handleStartSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!studentName.trim() || !rollNumber.trim()) return;
+
+    const newSid = `stud-${Date.now().toString(36)}`;
+    setSessionId(newSid);
+
     try {
-      // Request both camera and microphone as soon as they log in
+      await fetch(`${BACKEND_HTTP}/api/session/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: newSid,
+          candidate_name: studentName,
+          roll_number: rollNumber,
+          mobile_number: mobileNumber,
+          academic_year: academicYear,
+          subject_key: selectedSubject,
+          mode: mode,
+        }),
+      });
+
+      setSessionStarted(true);
+      setCurrentQIndex(0);
+      setStartTime(Date.now());
+
+      if (mode === "oral") {
+        initOralMode(newSid);
+      }
+    } catch (err) {
+      console.error("Failed to start session:", err);
+    }
+  };
+
+  // Oral WebSocket setup
+  const initOralMode = async (sid: string) => {
+    try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-        video: true
       });
       streamRef.current = mediaStream;
       setStream(mediaStream);
 
-      const ws = new WebSocket(`${BACKEND_WS}/ws/candidate/${sessionId}`);
+      const ws = new WebSocket(`${BACKEND_WS}/ws/candidate/${sid}`);
       ws.binaryType = "arraybuffer";
-      ws.onopen = async () => {
-        setStatus("Connected to Veritas");
+
+      ws.onopen = () => {
+        setStatus("Connected to Veritas Oral Processor");
         setJoined(true);
-        setError(null);
+      };
 
-        // Setup WebRTC
-        const pc = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-        });
-        pcRef.current = pc;
-
-        if (mediaStream) {
-          mediaStream.getTracks().forEach(track => pc.addTrack(track, mediaStream));
-        }
-
-        pc.ontrack = (event) => {
-          if (remoteVideoRef.current && event.streams[0]) {
-            remoteVideoRef.current.srcObject = event.streams[0];
-          }
-        };
-
-        pc.onicecandidate = (event) => {
-          if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: "webrtc",
-              payload: { type: "candidate", candidate: event.candidate }
-            }));
-          }
-        };
-
+      ws.onmessage = (e) => {
         try {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          ws.send(JSON.stringify({
-            type: "webrtc",
-            payload: { type: "offer", sdp: offer }
-          }));
-        } catch (e) {
-          console.error("WebRTC Error:", e);
-        }
+          const data = JSON.parse(e.data);
+          if (data.type === "analysis") {
+            setLastAnalysis(data);
+            setAnswersHistory((prev) => [...prev, data]);
+          }
+        } catch (err) {}
       };
-      
-      ws.onmessage = async (e) => {
-        if (typeof e.data === "string") {
-          try {
-            const data = JSON.parse(e.data);
-            if (data.type === "webrtc_from_interviewer") {
-              const payload = data.payload;
-              const pc = pcRef.current;
-              if (!pc) return;
-              if (payload.type === "answer") {
-                await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-              } else if (payload.type === "candidate") {
-                await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
-              } else if (payload.type === "offer") {
-                await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                wsRef.current?.send(JSON.stringify({
-                  type: "webrtc",
-                  payload: { type: "answer", sdp: answer }
-                }));
-              }
-            } else if (data.type === "question_set") {
-              setCurrentQuestion(data.question);
-            }
-          } catch(err) {}
-        }
-      };
-      ws.onclose = () => {
-        setStatus("Disconnected");
-        setJoined(false);
-      };
-      ws.onerror = () => {
-        setError("Could not connect to Veritas backend.");
-        setStatus("Connection error");
-      };
+
+      ws.onclose = () => setJoined(false);
       wsRef.current = ws;
-    } catch (e: any) {
-      setError(`Camera/Mic access denied: ${e?.message || "unknown"}`);
+    } catch (err) {
+      console.error("Mic access error:", err);
     }
   };
 
+  // Handle Paste in Written Mode (Anti-Cheat)
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+    setPasteAttempts((prev) => prev + 1);
+    setPasteWarning(true);
+    setTimeout(() => setPasteWarning(false), 4000);
+  };
+
+  // Submit Written Answer
+  const handleSubmitWritten = async () => {
+    if (!writtenAnswer.trim() || isSubmittingWritten) return;
+    setIsSubmittingWritten(true);
+
+    const activeQ = questions[currentQIndex];
+    const duration = Math.max(2, Math.round((Date.now() - startTime) / 1000));
+
+    try {
+      const res = await fetch(`${BACKEND_HTTP}/api/submit-written-answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          question: activeQ.question_text,
+          answer_text: writtenAnswer,
+          duration_sec: duration,
+          copy_paste_attempts: pasteAttempts,
+          reference_answer: activeQ.reference_answer || "",
+          rubric_keywords: activeQ.rubric_keywords || [],
+        }),
+      });
+
+      const analysis = await res.json();
+      setLastAnalysis(analysis);
+      setAnswersHistory((prev) => [...prev, analysis]);
+      setWrittenAnswer("");
+      setPasteAttempts(0);
+
+      if (currentQIndex < questions.length - 1) {
+        setCurrentQIndex((prev) => prev + 1);
+        setStartTime(Date.now());
+      } else {
+        // Finalize Session
+        await fetch(`${BACKEND_HTTP}/api/session/finalize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+      }
+    } catch (err) {
+      console.error("Written submission error:", err);
+    } finally {
+      setIsSubmittingWritten(false);
+    }
+  };
+
+  // Oral Microphone Control
   const startSpeaking = async () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     try {
       let currentStream = streamRef.current;
       if (!currentStream) {
-        currentStream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-          video: true
-        });
+        currentStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         streamRef.current = currentStream;
         setStream(currentStream);
       }
 
-      // Create AudioContext without forcing sample rate (Safari hates that)
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       audioCtxRef.current = ctx;
-      const actualRate = ctx.sampleRate;
 
-      // Send handshake telling backend the real rate
-      wsRef.current.send(JSON.stringify({ type: "hello", sample_rate: actualRate }));
+      wsRef.current.send(JSON.stringify({ type: "hello", sample_rate: ctx.sampleRate }));
       wsRef.current.send(JSON.stringify({ type: "answer_start", ts: Date.now() }));
 
       const source = ctx.createMediaStreamSource(currentStream);
       const processor = ctx.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
+
+      processor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        let sum = 0;
+        for (let i = 0; i < inputData.length; i++) {
+          sum += inputData[i] * inputData[i];
+        }
+        setAudioLevel(Math.min(100, Math.round(Math.sqrt(sum / inputData.length) * 400)));
+
+        const pcm16 = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          const s = Math.max(-1, Math.min(1, inputData[i]));
+          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(pcm16.buffer);
+        }
+      };
+
       source.connect(processor);
       processor.connect(ctx.destination);
-
       setSpeaking(true);
-      setStatus(`Recording at ${actualRate} Hz…`);
-
-      let levelSum = 0, levelCount = 0;
-      processor.onaudioprocess = (e) => {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-        const float32 = e.inputBuffer.getChannelData(0);
-
-        // Compute simple RMS for level meter
-        let s = 0;
-        for (let i = 0; i < float32.length; i++) s += float32[i] * float32[i];
-        const rms = Math.sqrt(s / float32.length);
-        levelSum += rms; levelCount++;
-        if (levelCount > 5) {
-          setAudioLevel(Math.min(1, (levelSum / levelCount) * 8));
-          levelSum = 0; levelCount = 0;
-        }
-
-        // PCM16
-        const pcm16 = new Int16Array(float32.length);
-        for (let i = 0; i < float32.length; i++) {
-          const v = Math.max(-1, Math.min(1, float32[i]));
-          pcm16[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
-        }
-        wsRef.current.send(pcm16.buffer);
-      };
     } catch (e: any) {
-      setError(`Mic access denied: ${e?.message || "unknown"}`);
-      setSpeaking(false);
+      console.error("Mic error:", e);
     }
   };
 
   const stopSpeaking = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "answer_end" }));
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
     }
-    processorRef.current?.disconnect();
-    audioCtxRef.current?.close().catch(() => {});
-    processorRef.current = null;
-    audioCtxRef.current = null;
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "answer_end", ts: Date.now() }));
+    }
     setSpeaking(false);
     setAudioLevel(0);
-    setStatus("Sent for analysis");
   };
 
-  useEffect(() => {
-    return () => {
-      stopSpeaking();
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      wsRef.current?.close();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6">
-      <div className="glass p-12 rounded-sm max-w-3xl w-full relative">
-        <p className="text-xs uppercase tracking-[0.3em] text-gold-400/70 mb-2">Candidate Console</p>
-        <h1 className="font-display text-4xl mb-8">Veritas Session</h1>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+      {/* Header */}
+      <header className="px-8 py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md flex justify-between items-center">
+        <Link href="/" className="flex items-center gap-3">
+          <div className="p-2 bg-amber-500/10 rounded-lg border border-amber-500/30">
+            <BookOpen className="w-5 h-5 text-amber-400" />
+          </div>
+          <div>
+            <span className="font-bold text-lg text-slate-100">VERITAS ACADEMIC</span>
+            <span className="block text-[10px] uppercase tracking-widest text-slate-400">Student Assessment Portal</span>
+          </div>
+        </Link>
+        <div className="flex items-center gap-4 text-xs">
+          {sessionStarted && (
+            <>
+              <span className="px-3 py-1 bg-slate-800 border border-slate-700 rounded-full text-slate-300">
+                <User className="w-3.5 h-3.5 inline mr-1 text-amber-400" /> {studentName} ({rollNumber})
+              </span>
+              <span className="px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-full text-amber-300 capitalize font-medium">
+                {mode} Assessment Mode
+              </span>
+            </>
+          )}
+          <button
+            onClick={handleStudentLogout}
+            className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl transition text-xs font-semibold"
+          >
+            Log Out
+          </button>
+        </div>
+      </header>
 
-        {error && (
-          <div className="mb-4 p-3 rounded-sm bg-crimson-600/15 border border-crimson-600/40 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-crimson-400 mt-0.5" />
-            <p className="text-sm text-crimson-200">{error}</p>
+      {/* Main Container */}
+      <main className="flex-1 p-6 max-w-5xl mx-auto w-full flex flex-col justify-center">
+        {!sessionStarted ? (
+          /* STEP 1: Student Registration Form */
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 max-w-xl mx-auto w-full shadow-2xl"
+          >
+            <div className="text-center mb-8">
+              <h2 className="text-2xl font-bold text-slate-50">Student Registration & Mode Choice</h2>
+              <p className="text-sm text-slate-400 mt-2">Enter your academic details and select your preferred interview mode.</p>
+            </div>
+
+            <form onSubmit={handleStartSession} className="space-y-6">
+              <div>
+                <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 mb-2">
+                  Full Name
+                </label>
+                <div className="relative">
+                  <User className="w-5 h-5 absolute left-3.5 top-3.5 text-slate-500" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Rahul Sharma"
+                    value={studentName}
+                    onChange={(e) => setStudentName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-4 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500 transition text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 mb-2">
+                  Roll Number / Student ID
+                </label>
+                <div className="relative">
+                  <Hash className="w-5 h-5 absolute left-3.5 top-3.5 text-slate-500" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="23eg107b19"
+                    value={rollNumber}
+                    onChange={(e) => setRollNumber(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-4 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500 transition text-sm font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 mb-2">
+                  Department / Subject
+                </label>
+                <select
+                  value={selectedSubject}
+                  onChange={(e) => setSubjectQuestions(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-slate-100 focus:outline-none focus:border-amber-500 transition text-sm"
+                >
+                  {subjects.map((s) => (
+                    <option key={s.key} value={s.key}>
+                      {s.name || s.label} ({s.department})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 mb-3">
+                  Select Interview Mode
+                </label>
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setMode("written")}
+                    className={`p-4 rounded-xl border text-left transition flex flex-col gap-2 ${
+                      mode === "written"
+                        ? "bg-amber-500/10 border-amber-500 text-amber-300"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <Edit3 className="w-6 h-6 text-amber-400" />
+                    <div>
+                      <div className="font-bold text-sm text-slate-100">Written (Text)</div>
+                      <div className="text-[11px] text-slate-400 mt-1">Timed typing with paste-prohibition & anti-cheat analytics</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMode("oral")}
+                    className={`p-4 rounded-xl border text-left transition flex flex-col gap-2 ${
+                      mode === "oral"
+                        ? "bg-amber-500/10 border-amber-500 text-amber-300"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <Mic className="w-6 h-6 text-amber-400" />
+                    <div>
+                      <div className="font-bold text-sm text-slate-100">Oral (Voice)</div>
+                      <div className="text-[11px] text-slate-400 mt-1">Spoken answer capture via mic + Whisper transcription</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl transition shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 text-sm"
+              >
+                Begin Assessment <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+          </motion.div>
+        ) : (
+          /* STEP 2: Active Assessment Panel */
+          <div className="space-y-6">
+            {/* Question Progress Header */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 flex justify-between items-center">
+              <div>
+                <span className="text-xs uppercase tracking-wider font-semibold text-amber-400">
+                  Question {currentQIndex + 1} of {questions.length}
+                </span>
+                <h3 className="text-xl font-bold text-slate-100 mt-1">
+                  {questions[currentQIndex]?.question_text || "Loading question..."}
+                </h3>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-slate-400 block">Max Marks: {questions[currentQIndex]?.max_marks || 10}</span>
+                <span className="text-xs text-slate-400 flex items-center gap-1 mt-1">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" /> Time Limit: {questions[currentQIndex]?.time_limit_sec || 120}s
+                </span>
+              </div>
+            </div>
+
+            {/* Paste Violation Alert Banner */}
+            <AnimatePresence>
+              {pasteWarning && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-center gap-3 text-red-300 text-sm"
+                >
+                  <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+                  <div>
+                    <strong>Anti-Cheat Security Alert:</strong> Copy-pasting is strictly prohibited! Paste attempt #{pasteAttempts} has been logged in your audit report.
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* MODE SPECIFIC ASSESSMENT INTERFACE */}
+            {mode === "written" ? (
+              /* WRITTEN TEXT AREA */
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4">
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                  <span>Type your detailed answer below:</span>
+                  <span className="font-mono">{writtenAnswer.split(/\s+/).filter(Boolean).length} words | {writtenAnswer.length} chars</span>
+                </div>
+
+                <textarea
+                  rows={8}
+                  onPaste={handlePaste}
+                  value={writtenAnswer}
+                  onChange={(e) => setWrittenAnswer(e.target.value)}
+                  placeholder="Explain your conceptual response clearly..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-slate-100 focus:outline-none focus:border-amber-500 transition text-sm font-sans resize-none leading-relaxed"
+                />
+
+                <div className="flex justify-between items-center pt-2">
+                  <div className="text-xs text-slate-500 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-400" /> Anti-paste & typing cadence monitor active
+                  </div>
+                  <button
+                    onClick={handleSubmitWritten}
+                    disabled={!writtenAnswer.trim() || isSubmittingWritten}
+                    className="px-6 py-3 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl transition flex items-center gap-2 text-sm shadow-md"
+                  >
+                    {isSubmittingWritten ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Submit Answer & Continue"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* ORAL VOICE INTERFACE */
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-8 text-center space-y-6">
+                <div className="flex justify-center items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${joined ? "bg-emerald-500 animate-pulse" : "bg-slate-600"}`} />
+                  <span className="text-xs font-mono text-slate-400">{status}</span>
+                </div>
+
+                <div className="py-6">
+                  {!speaking ? (
+                    <button
+                      onClick={startSpeaking}
+                      className="w-24 h-24 rounded-full bg-amber-500/10 border-2 border-amber-500 text-amber-400 hover:bg-amber-500/20 transition flex flex-col items-center justify-center mx-auto shadow-lg shadow-amber-500/10"
+                    >
+                      <Mic className="w-8 h-8" />
+                      <span className="text-[10px] font-bold uppercase mt-1">Start Speaking</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopSpeaking}
+                      className="w-24 h-24 rounded-full bg-red-500/20 border-2 border-red-500 text-red-400 animate-pulse flex flex-col items-center justify-center mx-auto shadow-lg shadow-red-500/20"
+                    >
+                      <MicOff className="w-8 h-8" />
+                      <span className="text-[10px] font-bold uppercase mt-1">Stop & Submit</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Audio Level Waveform Meter */}
+                {speaking && (
+                  <div className="max-w-md mx-auto space-y-2">
+                    <div className="text-xs text-amber-400 font-mono">Recording audio stream... ({audioLevel}%)</div>
+                    <div className="h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                      <div className="h-full bg-amber-400 transition-all duration-75" style={{ width: `${audioLevel}%` }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* INSTANT EVALUATION RESULT CARD */}
+            {lastAnalysis && (
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-4"
+              >
+                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                  <span className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400" /> Evaluation Summary for Question #{answersHistory.length}
+                  </span>
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    Accuracy: {lastAnalysis.accuracy_score || 85}%
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <div className="text-xs text-slate-500">Overall Grade</div>
+                    <div className="text-lg font-bold text-amber-400 mt-1">{lastAnalysis.overall_score || 88}/100</div>
+                  </div>
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <div className="text-xs text-slate-500">Authenticity Score</div>
+                    <div className="text-lg font-bold text-slate-200 mt-1">{lastAnalysis.authenticity_score}%</div>
+                  </div>
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <div className="text-xs text-slate-500">Word Count</div>
+                    <div className="text-lg font-bold text-slate-200 mt-1">{lastAnalysis.word_count} w</div>
+                  </div>
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <div className="text-xs text-slate-500">Paste Violations</div>
+                    <div className={`text-lg font-bold mt-1 ${lastAnalysis.copy_paste_attempts > 0 ? "text-red-400" : "text-emerald-400"}`}>
+                      {lastAnalysis.copy_paste_attempts || 0}
+                    </div>
+                  </div>
+                </div>
+
+                {lastAnalysis.conceptual_feedback && (
+                  <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 text-xs leading-relaxed text-slate-300">
+                    <strong className="text-amber-400 block mb-1">Conceptual Feedback:</strong>
+                    {lastAnalysis.conceptual_feedback}
+                  </div>
+                )}
+              </motion.div>
+            )}
           </div>
         )}
-
-        {!joined ? (
-          <>
-            <label className="block text-sm text-gold-50/60 mb-2">Session ID</label>
-            <input value={sessionId} onChange={(e) => setSessionId(e.target.value)}
-                   className="w-full bg-ink-700 border border-gold-400/20 px-4 py-3 rounded-sm text-gold-50 focus:border-gold-400/60 outline-none" />
-            <button onClick={join} className="mt-6 w-full py-3 bg-gold-500 text-ink-900 font-semibold rounded-sm hover:bg-gold-400">
-              Join Interview
-            </button>
-          </>
-        ) : (
-          <>
-            {stream && (
-              <div className="mb-8 rounded-sm overflow-hidden border border-gold-400/20 w-full aspect-video mx-auto bg-ink-900 relative shadow-lg">
-                <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                
-                <div className="absolute top-4 right-4 w-32 md:w-48 aspect-video rounded-sm overflow-hidden border border-gold-400/50 shadow-xl bg-ink-900">
-                  <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
-                </div>
-
-                <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-ink-900/70 px-2 py-0.5 rounded backdrop-blur-sm">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                  <span className="text-[9px] text-emerald-400 uppercase tracking-widest font-mono">Live Call</span>
-                </div>
-              </div>
-            )}
-
-            <div className="flex items-center justify-center gap-2 text-sm text-gold-50/60 mb-8">
-              <Radio className={`w-4 h-4 ${joined ? "text-emerald-400" : "text-gold-50/30"}`} />
-              {status}
-            </div>
-
-            {currentQuestion && (
-              <div className="mb-8 p-6 glass rounded-sm border border-gold-400/20 text-center relative max-w-xl mx-auto">
-                <p className="text-xs uppercase tracking-[0.2em] text-gold-400/70 mb-2">Current Question</p>
-                <p className="font-display text-xl text-gold-200">"{currentQuestion}"</p>
-              </div>
-            )}
-            
-            <div className="flex flex-col items-center gap-6">
-              <button onClick={speaking ? stopSpeaking : startSpeaking}
-                className={`w-32 h-32 rounded-full flex items-center justify-center transition-all relative ${
-                  speaking ? "bg-crimson-600 alert-pulse" : "bg-gold-500 hover:bg-gold-400 glow-gold"
-                }`}>
-                {speaking ? <MicOff className="w-12 h-12 text-ink-900" /> : <Mic className="w-12 h-12 text-ink-900" />}
-                {speaking && (
-                  <div className="absolute -inset-2 rounded-full border-2 border-crimson-400/40 pointer-events-none"
-                       style={{ transform: `scale(${1 + audioLevel * 0.3})`, transition: "transform 0.1s" }} />
-                )}
-              </button>
-              <p className="text-sm text-gold-50/50">
-                {speaking ? "Tap to stop answer" : "Tap to begin answer"}
-              </p>
-              {speaking && (
-                <div className="w-48 h-1 bg-ink-700 rounded-full overflow-hidden">
-                  <div className="h-full bg-emerald-400 transition-all" style={{ width: `${audioLevel * 100}%` }} />
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-      <p className="mt-8 text-xs text-gold-50/30 max-w-md text-center">
-        Audio is processed for behavioral signals. Not a verdict — data to support fairer decisions.
-      </p>
+      </main>
     </div>
   );
 }

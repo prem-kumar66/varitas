@@ -319,30 +319,87 @@ class CognitiveAnalyzer:
         return 5.0, "No detected inconsistency", []
 
     # =========================================================================
+    # Written Mode Anti-Cheat: Cadence & Paste Detection
+    # =========================================================================
+    def score_written_cadence(
+        self, seg: AnswerSegment, copy_paste_attempts: int = 0
+    ) -> Tuple[float, str, List[Evidence]]:
+        evidence: List[Evidence] = []
+        score = 0.0
+
+        if copy_paste_attempts > 0:
+            score += min(90.0, copy_paste_attempts * 45.0)
+            evidence.append(
+                Evidence(
+                    f"{copy_paste_attempts} paste event(s)",
+                    "Attempted to paste text directly into answer area",
+                    score,
+                )
+            )
+
+        if seg.duration_sec > 0:
+            typing_wpm = (seg.word_count / max(1.0, seg.duration_sec)) * 60
+            if typing_wpm > 180 and seg.word_count > 30:
+                evidence.append(
+                    Evidence(
+                        f"{typing_wpm:.0f} WPM",
+                        "Unusually fast typing speed (possible automated paste / script insertion)",
+                        75.0,
+                    )
+                )
+                score = max(score, 75.0)
+
+        if score > 0:
+            return min(100.0, score), f"Written mode security flag triggered ({copy_paste_attempts} paste attempts)", evidence
+        return 0.0, "Clean keystroke cadence without paste events", []
+
+    # =========================================================================
     # Composite
     # =========================================================================
-    def analyze(self, seg: AnswerSegment) -> Tuple[SignalScores, float]:
+    def analyze(self, seg: AnswerSegment, copy_paste_attempts: int = 0, is_written: bool = False) -> Tuple[SignalScores, float]:
         scores = SignalScores()
 
-        scores.delay, scores.explanations["delay"], scores.evidence["delay"] = self.score_delay(seg)
+        if is_written:
+            cadence_score, cadence_exp, cadence_ev = self.score_written_cadence(seg, copy_paste_attempts)
+            scores.pacing = cadence_score
+            scores.explanations["pacing"] = cadence_exp
+            scores.evidence["pacing"] = cadence_ev
+
+            scores.delay = 0.0
+            scores.explanations["delay"] = "N/A for written mode"
+            scores.evidence["delay"] = []
+            scores.hesitation = 0.0
+            scores.explanations["hesitation"] = "N/A for written mode"
+            scores.evidence["hesitation"] = []
+        else:
+            scores.delay, scores.explanations["delay"], scores.evidence["delay"] = self.score_delay(seg)
+            scores.hesitation, scores.explanations["hesitation"], scores.evidence["hesitation"] = self.score_hesitation(seg)
+            scores.pacing, scores.explanations["pacing"], scores.evidence["pacing"] = self.score_pacing(seg)
+
         scores.fluency, scores.explanations["fluency"], scores.evidence["fluency"], ppl = self.score_fluency(seg)
         scores.perplexity_value = ppl
-        scores.hesitation, scores.explanations["hesitation"], scores.evidence["hesitation"] = self.score_hesitation(seg)
         scores.polish, scores.explanations["polish"], scores.evidence["polish"] = self.score_polish(seg)
-        scores.pacing, scores.explanations["pacing"], scores.evidence["pacing"] = self.score_pacing(seg)
         scores.consistency, scores.explanations["consistency"], scores.evidence["consistency"] = self.score_consistency(seg)
 
-        risk = (
-            scores.delay * self.WEIGHTS["delay"]
-            + scores.fluency * self.WEIGHTS["fluency"]
-            + scores.hesitation * self.WEIGHTS["hesitation"]
-            + scores.polish * self.WEIGHTS["polish"]
-            + scores.pacing * self.WEIGHTS["pacing"]
-            + scores.consistency * self.WEIGHTS["consistency"]
-        )
+        if is_written:
+            risk = (
+                scores.pacing * 0.40  # Cadence & Copy-Paste weight
+                + scores.fluency * 0.35  # AI Perplexity weight
+                + scores.polish * 0.25  # LLM phrase tell weight
+            )
+        else:
+            risk = (
+                scores.delay * self.WEIGHTS["delay"]
+                + scores.fluency * self.WEIGHTS["fluency"]
+                + scores.hesitation * self.WEIGHTS["hesitation"]
+                + scores.polish * self.WEIGHTS["polish"]
+                + scores.pacing * self.WEIGHTS["pacing"]
+                + scores.consistency * self.WEIGHTS["consistency"]
+            )
 
         self.history.append(seg)
         return scores, min(100.0, risk)
 
     def authenticity_score(self, risk: float) -> float:
         return max(0.0, 100.0 - risk)
+

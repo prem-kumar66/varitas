@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 
 from analyzer import CognitiveAnalyzer, AnswerSegment, Baseline
 from follow_up import FollowUpGenerator
+from validator import validate_answer
 import db
 import report
 import demo_mode
@@ -56,11 +57,25 @@ def load_whisper():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
+    # Initialize default academic subjects & question templates into DB
+    for key, template in templates_mod.SUBJECT_TEMPLATES.items():
+        await db.db_add_subject(key, template["name"], template["department"])
+        existing_q = await db.db_list_questions(key)
+        if not existing_q:
+            for q in template["questions"]:
+                await db.db_add_question(
+                    subject_key=key,
+                    question_text=q["question"],
+                    reference_answer=q["reference_answer"],
+                    rubric_keywords=q["rubric_keywords"],
+                    max_marks=q.get("max_marks", 10),
+                    time_limit_sec=q.get("time_limit_sec", 120),
+                )
     load_whisper()
     yield
 
 
-app = FastAPI(title="Veritas", lifespan=lifespan)
+app = FastAPI(title="Veritas Academic", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=True,
     allow_methods=["*"], allow_headers=["*"],
@@ -75,6 +90,8 @@ class InterviewSession:
         self.analyzer = CognitiveAnalyzer(language=language)
         self.follow_up_gen = FollowUpGenerator()
         self.current_question: str = ""
+        self.current_reference_answer: str = ""
+        self.current_rubric_keywords: list = []
         self.question_end_time: float = 0.0
         self.calibration_pending: bool = False
         self.candidate_ws: Optional[WebSocket] = None
@@ -110,13 +127,40 @@ def get_session(sid: str, language: str = "en") -> InterviewSession:
 class SessionStart(BaseModel):
     session_id: str
     candidate_name: str = ""
+    roll_number: str = ""
     role: str = ""
+    subject_key: str = ""
+    mode: str = "oral"
     language: str = "en"
 
 class QuestionPayload(BaseModel):
     session_id: str
     question: str
+    reference_answer: str = ""
+    rubric_keywords: Optional[list] = None
     is_calibration: bool = False
+
+class WrittenAnswerPayload(BaseModel):
+    session_id: str
+    question: str
+    answer_text: str
+    duration_sec: float = 0.0
+    copy_paste_attempts: int = 0
+    reference_answer: str = ""
+    rubric_keywords: Optional[list] = None
+
+class SubjectPayload(BaseModel):
+    key: str
+    name: str
+    department: str
+
+class QuestionBankPayload(BaseModel):
+    subject_key: str
+    question_text: str
+    reference_answer: str
+    rubric_keywords: list
+    max_marks: int = 10
+    time_limit_sec: int = 120
 
 class DemoRun(BaseModel):
     session_id: str
@@ -126,6 +170,42 @@ class FinalizeBody(BaseModel):
     session_id: str
 
 
+# ---------- Academic Question Bank APIs ----------
+@app.get("/api/academic/subjects")
+async def get_academic_subjects():
+    subjects = await db.db_list_subjects()
+    if not subjects:
+        return {"subjects": templates_mod.list_templates()}
+    return {"subjects": subjects}
+
+
+@app.post("/api/academic/subjects")
+async def add_academic_subject(body: SubjectPayload):
+    await db.db_add_subject(body.key, body.name, body.department)
+    return {"ok": True}
+
+
+@app.get("/api/academic/questions")
+async def get_academic_questions(subject_key: Optional[str] = None):
+    questions = await db.db_list_questions(subject_key)
+    return {"questions": questions}
+
+
+@app.post("/api/academic/questions")
+async def add_academic_question(body: QuestionBankPayload):
+    qid = await db.db_add_question(
+        body.subject_key, body.question_text, body.reference_answer,
+        body.rubric_keywords, body.max_marks, body.time_limit_sec,
+    )
+    return {"ok": True, "id": qid}
+
+
+@app.delete("/api/academic/questions/{question_id}")
+async def delete_academic_question(question_id: int):
+    await db.db_delete_question(question_id)
+    return {"ok": True}
+
+
 # ---------- Session lifecycle ----------
 @app.post("/api/session/start")
 async def session_start(body: SessionStart):
@@ -133,7 +213,11 @@ async def session_start(body: SessionStart):
     sess = get_session(body.session_id, body.language)
     sess.language = body.language
     sess.analyzer = CognitiveAnalyzer(language=body.language)
-    await db.upsert_session(body.session_id, body.candidate_name, body.role, started_at)
+    await db.upsert_session(
+        body.session_id, body.candidate_name, body.roll_number,
+        body.mobile_number, body.academic_year,
+        body.role, body.subject_key, body.mode, started_at,
+    )
     return {"ok": True, "session_id": body.session_id, "started_at": started_at}
 
 
@@ -172,15 +256,120 @@ async def session_answers(session_id: str):
 async def set_question(payload: QuestionPayload):
     sess = get_session(payload.session_id)
     sess.current_question = payload.question
+    sess.current_reference_answer = payload.reference_answer or ""
+    sess.current_rubric_keywords = payload.rubric_keywords or []
     sess.question_end_time = time.time()
     sess.calibration_pending = payload.is_calibration
     await sess.broadcast({
         "type": "question_set",
         "question": payload.question,
+        "reference_answer": payload.reference_answer,
+        "rubric_keywords": payload.rubric_keywords,
         "is_calibration": payload.is_calibration,
         "timestamp": sess.question_end_time,
     })
     return {"ok": True, "question_end_time": sess.question_end_time}
+
+
+# ---------- Written Answer Submission ----------
+@app.post("/api/submit-written-answer")
+async def submit_written_answer(payload: WrittenAnswerPayload):
+    sess = get_session(payload.session_id)
+    now = time.time()
+    word_count = len(payload.answer_text.split())
+    duration_sec = max(1.0, payload.duration_sec)
+
+    seg = AnswerSegment(
+        question=payload.question,
+        transcript=payload.answer_text,
+        question_end_time=now - duration_sec,
+        answer_start_time=now - duration_sec,
+        answer_end_time=now,
+        word_count=word_count,
+        duration_sec=duration_sec,
+    )
+
+    # 1. Anti-Cheat & Cognitive Authenticity Analysis
+    scores, risk = sess.analyzer.analyze(
+        seg, copy_paste_attempts=payload.copy_paste_attempts, is_written=True
+    )
+    authenticity = sess.analyzer.authenticity_score(risk)
+
+    # 2. Semantic Validation vs Reference Model Answer
+    validation = validate_answer(
+        payload.question, payload.answer_text,
+        payload.reference_answer or sess.current_reference_answer,
+        payload.rubric_keywords or sess.current_rubric_keywords,
+    )
+    accuracy = validation["accuracy_score"]
+
+    # Composite Score: 65% Accuracy + 35% Authenticity
+    overall_score = round((accuracy * 0.65) + (authenticity * 0.35), 1)
+
+    signals_dict = {
+        "delay": scores.delay, "fluency": scores.fluency,
+        "hesitation": scores.hesitation, "polish": scores.polish,
+        "pacing": scores.pacing, "consistency": scores.consistency,
+    }
+    evidence_dict = {
+        k: [{"span": e.span, "reason": e.reason, "weight": e.weight} for e in v]
+        for k, v in scores.evidence.items()
+    }
+
+    out_payload = {
+        "type": "analysis",
+        "mode": "written",
+        "transcript": payload.answer_text,
+        "question": payload.question,
+        "timing": {"delay_before_answer": 0.0, "answer_duration": duration_sec},
+        "signals": signals_dict,
+        "explanations": scores.explanations,
+        "evidence": evidence_dict,
+        "risk_score": round(risk, 1),
+        "authenticity_score": round(authenticity, 1),
+        "accuracy_score": round(accuracy, 1),
+        "overall_score": overall_score,
+        "copy_paste_attempts": payload.copy_paste_attempts,
+        "reference_answer": payload.reference_answer or sess.current_reference_answer,
+        "key_points_covered": validation["key_points_covered"],
+        "missing_points": validation["missing_points"],
+        "conceptual_feedback": validation["conceptual_feedback"],
+        "follow_up": "Written answer submission complete.",
+        "word_count": word_count,
+        "perplexity": scores.perplexity_value,
+        "calibrated": False,
+        "simulated": False,
+    }
+
+    await sess.broadcast(out_payload)
+
+    await db.save_answer(
+        session_id=sess.session_id,
+        question=payload.question,
+        transcript=payload.answer_text,
+        delay_sec=0.0,
+        duration_sec=duration_sec,
+        word_count=word_count,
+        risk_score=risk,
+        authenticity_score=authenticity,
+        signals=signals_dict,
+        explanations=scores.explanations,
+        evidence=evidence_dict,
+        follow_up="Written answer submission",
+        perplexity=scores.perplexity_value,
+        is_calibration=False,
+        created_at=now,
+        mode="written",
+        accuracy_score=accuracy,
+        overall_score=overall_score,
+        copy_paste_attempts=payload.copy_paste_attempts,
+        reference_answer=payload.reference_answer or sess.current_reference_answer,
+        key_points_covered=validation["key_points_covered"],
+        missing_points=validation["missing_points"],
+        conceptual_feedback=validation["conceptual_feedback"],
+    )
+
+    return out_payload
 
 
 # ---------- Templates ----------
