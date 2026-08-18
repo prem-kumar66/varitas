@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { GraduationCap, Mic, Edit3, ShieldCheck, CheckCircle, BarChart3, BookOpen, ArrowRight, UserCheck } from "lucide-react";
+import { GraduationCap, Mic, Edit3, ShieldCheck, CheckCircle, BarChart3, BookOpen, ArrowRight, UserCheck, ListChecks } from "lucide-react";
 
 export default function Home() {
   return (
@@ -45,19 +45,19 @@ export default function Home() {
           className="max-w-4xl mx-auto"
         >
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-medium mb-8">
-            <ShieldCheck className="w-4 h-4 text-amber-400" /> AI-Driven Student Testing & Teacher Evaluation System
+            <ShieldCheck className="w-4 h-4 text-amber-400" /> AI-Driven Student Testing & Evaluation System
           </div>
 
           <h1 className="font-display text-5xl md:text-7xl font-extrabold leading-tight text-slate-50 tracking-tight">
             College Assessment Platform
             <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 italic">
-              for Students & Teachers
+              for Students
             </span>
           </h1>
 
           <p className="mt-8 text-slate-400 max-w-2xl mx-auto text-lg leading-relaxed">
-            A unified platform built for students to complete <strong className="text-amber-300 font-semibold">Oral or Written tests</strong> with cognitive anti-cheat tracking, and for teachers to <strong className="text-amber-300 font-semibold">manage model answer keys and evaluate student performance</strong>.
+            A unified platform built for students to complete <strong className="text-amber-300 font-semibold">Oral, Written, or Quiz tests</strong> with cognitive anti-cheat tracking and <strong className="text-amber-300 font-semibold">AI-powered evaluation of student performance</strong>.
           </p>
 
           {/* DUAL ROLE LOGIN CHOICE CARDS */}
@@ -73,7 +73,7 @@ export default function Home() {
                 </div>
                 <h3 className="font-bold text-xl text-slate-100">Student Portal</h3>
                 <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                  Log in with your Roll Number to take AI-conducted Oral (voice) or Written (text) tests with anti-cheat monitoring.
+                  Log in with your Roll Number to take AI-conducted Oral (voice), Written (text), or Quiz (MCQ) tests with anti-cheat monitoring.
                 </p>
               </div>
               <Link
@@ -109,7 +109,7 @@ export default function Home() {
         </motion.div>
 
         {/* Feature Grid */}
-        <div className="mt-20 grid grid-cols-1 md:grid-cols-4 gap-6 max-w-6xl w-full">
+        <div className="mt-20 grid grid-cols-1 md:grid-cols-5 gap-6 max-w-6xl w-full">
           {[
             {
               icon: Mic,
@@ -120,6 +120,11 @@ export default function Home() {
               icon: Edit3,
               title: "Written (Text) Tests",
               desc: "Timed rich text editor with paste-blocking, keystroke cadence analysis, and GPT-2 perplexity check.",
+            },
+            {
+              icon: ListChecks,
+              title: "Quiz (MCQ) Tests",
+              desc: "Multiple-choice question format with instant AI scoring and per-option analysis for quick assessments.",
             },
             {
               icon: CheckCircle,

@@ -109,6 +109,166 @@ SUBJECT_TEMPLATES = {
 }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MCQ QUESTION BANK  (Quiz mode only)
+# correct_answer is NEVER sent to the frontend — validated server-side only
+# ─────────────────────────────────────────────────────────────────────────────
+MCQ_TEMPLATES: dict = {
+    "computer_science": {
+        "name": "Computer Science & Data Structures",
+        "questions": [
+            {
+                "question": "Which data structure provides average O(1) time complexity for insertion, deletion, and lookup by key?",
+                "options": {"A": "Binary Search Tree", "B": "Hash Map", "C": "Linked List", "D": "Stack"},
+                "correct_answer": "B",
+                "explanation": "A Hash Map uses a hash function to map keys to buckets, giving O(1) average-case performance. BSTs are O(log n) and Linked Lists are O(n).",
+            },
+            {
+                "question": "What is the worst-case time complexity of QuickSort?",
+                "options": {"A": "O(n log n)", "B": "O(n)", "C": "O(n²)", "D": "O(log n)"},
+                "correct_answer": "C",
+                "explanation": "QuickSort degrades to O(n²) when the pivot consistently picks the smallest or largest element (e.g., already-sorted input with naive pivot selection).",
+            },
+            {
+                "question": "Which OOP principle allows a subclass to be treated as an instance of its parent class?",
+                "options": {"A": "Encapsulation", "B": "Abstraction", "C": "Polymorphism", "D": "Liskov Substitution"},
+                "correct_answer": "D",
+                "explanation": "The Liskov Substitution Principle (LSP) states that objects of a subclass should be substitutable for objects of the superclass without altering program correctness.",
+            },
+            {
+                "question": "In a min-heap, which element is always at the root?",
+                "options": {"A": "The largest element", "B": "The median element", "C": "The most recently inserted element", "D": "The smallest element"},
+                "correct_answer": "D",
+                "explanation": "A min-heap always places the smallest element at the root, with each parent node being smaller than or equal to its children.",
+            },
+            {
+                "question": "Which of the following sorting algorithms is stable AND has O(n log n) worst-case time complexity?",
+                "options": {"A": "QuickSort", "B": "HeapSort", "C": "MergeSort", "D": "Selection Sort"},
+                "correct_answer": "C",
+                "explanation": "MergeSort is stable (equal elements retain their original order) and guarantees O(n log n) in all cases. QuickSort is not stable; HeapSort is not stable; Selection Sort is O(n²).",
+            },
+            {
+                "question": "What does the 'S' in SOLID principles stand for?",
+                "options": {"A": "Synchronization Principle", "B": "Single Responsibility Principle", "C": "Substitution Principle", "D": "Separation of Concerns"},
+                "correct_answer": "B",
+                "explanation": "S = Single Responsibility Principle: a class should have only one reason to change, meaning it should have only one job or responsibility.",
+            },
+        ],
+    },
+    "data_science": {
+        "name": "Data Science & Artificial Intelligence",
+        "questions": [
+            {
+                "question": "Which of the following is an example of unsupervised learning?",
+                "options": {"A": "Linear Regression", "B": "Random Forest Classification", "C": "K-Means Clustering", "D": "Logistic Regression"},
+                "correct_answer": "C",
+                "explanation": "K-Means Clustering works on unlabeled data to find natural groupings. The other three options are supervised learning algorithms that require labeled training data.",
+            },
+            {
+                "question": "What does a high variance (overfitting) model indicate?",
+                "options": {"A": "The model performs well on both training and test data", "B": "The model is too simple to capture the data pattern", "C": "The model memorizes training data and fails on new data", "D": "The model has high bias"},
+                "correct_answer": "C",
+                "explanation": "High variance (overfitting) means the model has memorized the training data too closely, including noise, and generalizes poorly to unseen data.",
+            },
+            {
+                "question": "Which regularization technique adds the sum of the absolute values of coefficients as a penalty term?",
+                "options": {"A": "L2 (Ridge)", "B": "Elastic Net", "C": "Dropout", "D": "L1 (Lasso)"},
+                "correct_answer": "D",
+                "explanation": "L1 regularization (Lasso) adds |w| as penalty, which can shrink coefficients to exactly zero, effectively performing feature selection. L2 (Ridge) adds w² and rarely zeroes coefficients.",
+            },
+            {
+                "question": "In a confusion matrix, what does 'False Positive' mean?",
+                "options": {"A": "The model correctly predicted a negative class", "B": "The model predicted positive but the actual label was negative", "C": "The model predicted negative but the actual label was positive", "D": "The model correctly predicted a positive class"},
+                "correct_answer": "B",
+                "explanation": "A False Positive (Type I error) occurs when the model predicts the positive class but the ground truth is actually negative — a false alarm.",
+            },
+            {
+                "question": "Which activation function is most commonly used in hidden layers of deep neural networks to avoid the vanishing gradient problem?",
+                "options": {"A": "Sigmoid", "B": "Tanh", "C": "Softmax", "D": "ReLU"},
+                "correct_answer": "D",
+                "explanation": "ReLU (Rectified Linear Unit) f(x)=max(0,x) is preferred because it does not saturate for positive values, allowing gradients to flow without vanishing. Sigmoid and Tanh saturate at extremes.",
+            },
+            {
+                "question": "Principal Component Analysis (PCA) is primarily used for:",
+                "options": {"A": "Classification of data points", "B": "Dimensionality reduction", "C": "Outlier detection", "D": "Hyperparameter tuning"},
+                "correct_answer": "B",
+                "explanation": "PCA transforms data into a new coordinate system of principal components ordered by variance explained, reducing dimensionality while retaining most information.",
+            },
+        ],
+    },
+    "business_admin": {
+        "name": "Business Administration & Management",
+        "questions": [
+            {
+                "question": "Which of the following best describes 'economies of scale'?",
+                "options": {"A": "Cost increases proportionally with output", "B": "Average cost per unit decreases as production volume increases", "C": "Fixed costs increase with more employees", "D": "Revenue grows faster than expenses at all times"},
+                "correct_answer": "B",
+                "explanation": "Economies of scale occur when increasing the scale of production leads to lower average costs per unit, due to spreading fixed costs over more units and operational efficiencies.",
+            },
+            {
+                "question": "In a SWOT analysis, 'Opportunities' refer to:",
+                "options": {"A": "Internal advantages the company possesses", "B": "Internal weaknesses that need improvement", "C": "External factors the company can exploit for growth", "D": "External threats from competitors or regulations"},
+                "correct_answer": "C",
+                "explanation": "Opportunities are external favorable factors — such as new markets, emerging trends, or reduced competition — that the organization can leverage to achieve its goals.",
+            },
+            {
+                "question": "Which leadership style involves making decisions without consulting team members?",
+                "options": {"A": "Democratic", "B": "Laissez-faire", "C": "Transformational", "D": "Autocratic"},
+                "correct_answer": "D",
+                "explanation": "Autocratic (authoritarian) leadership involves the leader making all decisions unilaterally, with little to no input from team members.",
+            },
+            {
+                "question": "Porter's Five Forces does NOT include which of the following?",
+                "options": {"A": "Threat of new entrants", "B": "Bargaining power of suppliers", "C": "Employee satisfaction index", "D": "Threat of substitute products"},
+                "correct_answer": "C",
+                "explanation": "Porter's Five Forces are: (1) Competitive rivalry, (2) Threat of new entrants, (3) Bargaining power of buyers, (4) Bargaining power of suppliers, (5) Threat of substitutes. Employee satisfaction is not one of them.",
+            },
+            {
+                "question": "Which financial statement shows a company's revenues and expenses over a specific period?",
+                "options": {"A": "Balance Sheet", "B": "Cash Flow Statement", "C": "Income Statement (Profit & Loss)", "D": "Statement of Retained Earnings"},
+                "correct_answer": "C",
+                "explanation": "The Income Statement (P&L) shows revenues, costs, and profits/losses over a period. The Balance Sheet shows assets/liabilities at a point in time. The Cash Flow Statement shows cash movements.",
+            },
+        ],
+    },
+    "general_aptitude": {
+        "name": "General Aptitude & Logical Reasoning",
+        "questions": [
+            {
+                "question": "If all Bloops are Razzles and all Razzles are Lazzles, which statement must be true?",
+                "options": {"A": "All Lazzles are Bloops", "B": "All Bloops are Lazzles", "C": "Some Razzles are not Lazzles", "D": "No Bloops are Lazzles"},
+                "correct_answer": "B",
+                "explanation": "Using transitive logic: Bloop → Razzle → Lazzle. Therefore all Bloops are Lazzles. The reverse (all Lazzles are Bloops) is not necessarily true.",
+            },
+            {
+                "question": "A train travels 300 km in 4 hours. If it increases its speed by 25%, how long will it take to travel the same 300 km?",
+                "options": {"A": "3 hours 12 minutes", "B": "3 hours 30 minutes", "C": "2 hours 40 minutes", "D": "3 hours 45 minutes"},
+                "correct_answer": "A",
+                "explanation": "Original speed = 75 km/h. Increased by 25% = 93.75 km/h. Time = 300 / 93.75 = 3.2 hours = 3 hours 12 minutes.",
+            },
+            {
+                "question": "Find the odd one out: 2, 3, 5, 7, 11, 14, 13",
+                "options": {"A": "11", "B": "7", "C": "14", "D": "13"},
+                "correct_answer": "C",
+                "explanation": "All other numbers (2, 3, 5, 7, 11, 13) are prime numbers. 14 = 2 × 7, so it is composite and is the odd one out.",
+            },
+            {
+                "question": "Which of the following problem-solving frameworks uses Situation, Task, Action, and Result?",
+                "options": {"A": "SWOT", "B": "STAR", "C": "SMART", "D": "PDCA"},
+                "correct_answer": "B",
+                "explanation": "The STAR method (Situation, Task, Action, Result) is a structured framework for answering behavioral interview questions by narrating a specific relevant experience.",
+            },
+            {
+                "question": "If a clock shows 3:15, what is the angle between the hour and minute hands?",
+                "options": {"A": "0°", "B": "7.5°", "C": "15°", "D": "22.5°"},
+                "correct_answer": "B",
+                "explanation": "At 3:15, the minute hand is at 90° (15×6). The hour hand at 3:00 is at 90°, but moves 0.5° per minute, so at 3:15 it's at 90° + 7.5° = 97.5°. Angle between them = 97.5° − 90° = 7.5°.",
+            },
+        ],
+    },
+}
+
+
 def list_templates():
     return [
         {
@@ -123,3 +283,42 @@ def list_templates():
 
 def get_template(key: str):
     return SUBJECT_TEMPLATES.get(key)
+
+
+def get_mcq_questions(subject_key: str, include_answers: bool = False) -> list:
+    """Return MCQ questions for a subject. Never include correct_answer unless server needs it."""
+    template = MCQ_TEMPLATES.get(subject_key, {})
+    questions = template.get("questions", [])
+    result = []
+    for i, q in enumerate(questions):
+        entry = {
+            "index": i,
+            "question": q["question"],
+            "options": q["options"],
+        }
+        if include_answers:
+            entry["correct_answer"] = q["correct_answer"]
+            entry["explanation"] = q.get("explanation", "")
+        result.append(entry)
+    return result
+
+
+def check_mcq_answer(subject_key: str, question_index: int, selected_option: str):
+    """Validate a quiz answer server-side. Returns result dict."""
+    template = MCQ_TEMPLATES.get(subject_key, {})
+    questions = template.get("questions", [])
+    if question_index < 0 or question_index >= len(questions):
+        return None
+    q = questions[question_index]
+    correct = q["correct_answer"]
+    is_correct = selected_option.upper() == correct.upper()
+    return {
+        "correct": is_correct,
+        "correct_answer": correct,
+        "correct_answer_text": q["options"][correct],
+        "selected_option": selected_option.upper(),
+        "selected_text": q["options"].get(selected_option.upper(), ""),
+        "explanation": q.get("explanation", ""),
+        "score": 10 if is_correct else 0,
+    }
+

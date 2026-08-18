@@ -5,7 +5,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Mic, MicOff, Radio, AlertTriangle, ShieldCheck, CheckCircle2,
-  Edit3, ArrowRight, RefreshCw, User, Hash, BookOpen, Clock, AlertCircle, Sparkles
+  Edit3, ArrowRight, RefreshCw, User, Hash, BookOpen, Clock, AlertCircle, Sparkles, ListChecks
 } from "lucide-react";
 
 const BACKEND_HTTP = process.env.NEXT_PUBLIC_BACKEND_HTTP || "http://localhost:8000";
@@ -13,6 +13,7 @@ const BACKEND_WS = process.env.NEXT_PUBLIC_BACKEND_WS || "ws://localhost:8000";
 
 type Subject = { key: string; label?: string; name?: string; department: string; count?: number };
 type Question = { id?: number; question_text: string; reference_answer?: string; rubric_keywords?: string[]; max_marks?: number; time_limit_sec?: number };
+type MCQQuestion = { index: number; question: string; options: { A: string; B: string; C: string; D: string } };
 
 export default function CandidatePage() {
   const router = useRouter();
@@ -23,7 +24,11 @@ export default function CandidatePage() {
   const [academicYear, setAcademicYear] = useState("3rd Year");
   const [selectedSubject, setSelectedSubject] = useState("computer_science");
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [mode, setMode] = useState<"oral" | "written">("written");
+  const [mode, setMode] = useState<"oral" | "written" | "quiz">("written");
+  const [quizAnswer, setQuizAnswer] = useState<string | null>(null);
+  const [mcqQuestions, setMcqQuestions] = useState<MCQQuestion[]>([]);
+  const [isSubmittingQuiz, setIsSubmittingQuiz] = useState(false);
+  const [quizResult, setQuizResult] = useState<any>(null);
 
   // Flow State
   const [sessionStarted, setSessionStarted] = useState(false);
@@ -91,7 +96,8 @@ export default function CandidatePage() {
     router.push("/login/student");
   };
 
-  const setSubjectQuestions = (subjKey: string) => {
+  // Fetch TEXT questions (Written / Oral modes)
+  const fetchTextQuestions = (subjKey: string) => {
     setSelectedSubject(subjKey);
     fetch(`${BACKEND_HTTP}/api/academic/questions?subject_key=${subjKey}`)
       .then((res) => res.json())
@@ -111,12 +117,51 @@ export default function CandidatePage() {
             .then((r) => r.json())
             .then((tmpl) => {
               if (tmpl.questions) {
-                setQuestions(tmpl.questions.map((q: any) => typeof q === "string" ? { question_text: q } : q));
+                setQuestions(tmpl.questions.map((q: any) => typeof q === "string" ? { question_text: q } : { question_text: q.question || q.question_text, reference_answer: q.reference_answer, rubric_keywords: q.rubric_keywords, max_marks: q.max_marks, time_limit_sec: q.time_limit_sec }));
               }
             }).catch(() => {});
         }
       });
   };
+
+  // Fetch MCQ questions (Quiz mode only) — correct_answer NOT included in response
+  const fetchQuizQuestions = (subjKey: string) => {
+    setSelectedSubject(subjKey);
+    fetch(`${BACKEND_HTTP}/api/quiz/questions?subject_key=${subjKey}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.questions && data.questions.length > 0) {
+          setMcqQuestions(data.questions as MCQQuestion[]);
+        }
+      })
+      .catch((err) => console.error("Error fetching quiz questions:", err));
+  };
+
+  // Mode-aware subject change handler
+  const handleSubjectChange = (subjKey: string) => {
+    if (mode === "quiz") {
+      fetchQuizQuestions(subjKey);
+    } else {
+      fetchTextQuestions(subjKey);
+    }
+  };
+
+  // Mode-aware mode toggle
+  const handleModeChange = (newMode: "written" | "oral" | "quiz") => {
+    setMode(newMode);
+    setCurrentQIndex(0);
+    setLastAnalysis(null);
+    setQuizAnswer(null);
+    setQuizResult(null);
+    if (newMode === "quiz") {
+      fetchQuizQuestions(selectedSubject);
+    } else {
+      fetchTextQuestions(selectedSubject);
+    }
+  };
+
+  // Keep the old name as alias for backward compat with the useEffect call
+  const setSubjectQuestions = fetchTextQuestions;
 
   // Start Assessment Session
   const handleStartSession = async (e: React.FormEvent) => {
@@ -195,7 +240,7 @@ export default function CandidatePage() {
     setTimeout(() => setPasteWarning(false), 4000);
   };
 
-  // Submit Written Answer
+  // Submit Written Answer (Written / Oral modes)
   const handleSubmitWritten = async () => {
     if (!writtenAnswer.trim() || isSubmittingWritten) return;
     setIsSubmittingWritten(true);
@@ -228,7 +273,6 @@ export default function CandidatePage() {
         setCurrentQIndex((prev) => prev + 1);
         setStartTime(Date.now());
       } else {
-        // Finalize Session
         await fetch(`${BACKEND_HTTP}/api/session/finalize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -239,6 +283,50 @@ export default function CandidatePage() {
       console.error("Written submission error:", err);
     } finally {
       setIsSubmittingWritten(false);
+    }
+  };
+
+  // Submit Quiz (MCQ) Answer
+  const handleSubmitQuiz = async () => {
+    if (!quizAnswer || isSubmittingQuiz) return;
+    const activeMCQ = mcqQuestions[currentQIndex];
+    if (!activeMCQ) return;
+    setIsSubmittingQuiz(true);
+
+    try {
+      const res = await fetch(`${BACKEND_HTTP}/api/quiz/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          subject_key: selectedSubject,
+          question_index: activeMCQ.index,
+          question_text: activeMCQ.question,
+          selected_option: quizAnswer,
+        }),
+      });
+      const result = await res.json();
+      setQuizResult(result);
+      setLastAnalysis({ ...result, mode: "quiz", word_count: 1, copy_paste_attempts: 0 });
+      setAnswersHistory((prev) => [...prev, result]);
+      setQuizAnswer(null);
+
+      if (currentQIndex < mcqQuestions.length - 1) {
+        setTimeout(() => {
+          setCurrentQIndex((prev) => prev + 1);
+          setQuizResult(null);
+        }, 2000);
+      } else {
+        await fetch(`${BACKEND_HTTP}/api/session/finalize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+      }
+    } catch (err) {
+      console.error("Quiz submission error:", err);
+    } finally {
+      setIsSubmittingQuiz(false);
     }
   };
 
@@ -394,7 +482,7 @@ export default function CandidatePage() {
                 </label>
                 <select
                   value={selectedSubject}
-                  onChange={(e) => setSubjectQuestions(e.target.value)}
+                  onChange={(e) => handleSubjectChange(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-slate-100 focus:outline-none focus:border-amber-500 transition text-sm"
                 >
                   {subjects.map((s) => (
@@ -409,10 +497,10 @@ export default function CandidatePage() {
                 <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 mb-3">
                   Select Interview Mode
                 </label>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <button
                     type="button"
-                    onClick={() => setMode("written")}
+                    onClick={() => handleModeChange("written")}
                     className={`p-4 rounded-xl border text-left transition flex flex-col gap-2 ${
                       mode === "written"
                         ? "bg-amber-500/10 border-amber-500 text-amber-300"
@@ -428,7 +516,7 @@ export default function CandidatePage() {
 
                   <button
                     type="button"
-                    onClick={() => setMode("oral")}
+                    onClick={() => handleModeChange("oral")}
                     className={`p-4 rounded-xl border text-left transition flex flex-col gap-2 ${
                       mode === "oral"
                         ? "bg-amber-500/10 border-amber-500 text-amber-300"
@@ -439,6 +527,22 @@ export default function CandidatePage() {
                     <div>
                       <div className="font-bold text-sm text-slate-100">Oral (Voice)</div>
                       <div className="text-[11px] text-slate-400 mt-1">Spoken answer capture via mic + Whisper transcription</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleModeChange("quiz")}
+                    className={`p-4 rounded-xl border text-left transition flex flex-col gap-2 ${
+                      mode === "quiz"
+                        ? "bg-amber-500/10 border-amber-500 text-amber-300"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <ListChecks className="w-6 h-6 text-amber-400" />
+                    <div>
+                      <div className="font-bold text-sm text-slate-100">Quiz (MCQ)</div>
+                      <div className="text-[11px] text-slate-400 mt-1">Multiple-choice questions with instant AI scoring</div>
                     </div>
                   </button>
                 </div>
@@ -459,17 +563,28 @@ export default function CandidatePage() {
             <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 flex justify-between items-center">
               <div>
                 <span className="text-xs uppercase tracking-wider font-semibold text-amber-400">
-                  Question {currentQIndex + 1} of {questions.length}
+                  {mode === "quiz"
+                    ? `Question ${currentQIndex + 1} of ${mcqQuestions.length}`
+                    : `Question ${currentQIndex + 1} of ${questions.length}`}
                 </span>
                 <h3 className="text-xl font-bold text-slate-100 mt-1">
-                  {questions[currentQIndex]?.question_text || "Loading question..."}
+                  {mode === "quiz"
+                    ? (mcqQuestions[currentQIndex]?.question || "Loading question...")
+                    : (questions[currentQIndex]?.question_text || "Loading question...")}
                 </h3>
               </div>
               <div className="text-right">
-                <span className="text-xs text-slate-400 block">Max Marks: {questions[currentQIndex]?.max_marks || 10}</span>
-                <span className="text-xs text-slate-400 flex items-center gap-1 mt-1">
-                  <Clock className="w-3.5 h-3.5 text-amber-400" /> Time Limit: {questions[currentQIndex]?.time_limit_sec || 120}s
-                </span>
+                {mode !== "quiz" && (
+                  <>
+                    <span className="text-xs text-slate-400 block">Max Marks: {questions[currentQIndex]?.max_marks || 10}</span>
+                    <span className="text-xs text-slate-400 flex items-center gap-1 mt-1">
+                      <Clock className="w-3.5 h-3.5 text-amber-400" /> Time Limit: {questions[currentQIndex]?.time_limit_sec || 120}s
+                    </span>
+                  </>
+                )}
+                {mode === "quiz" && (
+                  <span className="text-xs text-slate-400 block">10 marks · Select one</span>
+                )}
               </div>
             </div>
 
@@ -490,9 +605,8 @@ export default function CandidatePage() {
               )}
             </AnimatePresence>
 
-            {/* MODE SPECIFIC ASSESSMENT INTERFACE */}
             {mode === "written" ? (
-              /* WRITTEN TEXT AREA */
+              /* WRITTEN TEXT AREA — open-ended subjective questions */
               <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4">
                 <div className="flex justify-between items-center text-xs text-slate-400">
                   <span>Type your detailed answer below:</span>
@@ -519,6 +633,73 @@ export default function CandidatePage() {
                   >
                     {isSubmittingWritten ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Submit Answer & Continue"}
                   </button>
+                </div>
+              </div>
+            ) : mode === "quiz" ? (
+              /* QUIZ MCQ INTERFACE — separate MCQ question bank, not the same as Written/Oral */
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4">
+                <div className="flex items-center gap-2 text-xs text-amber-400 font-semibold uppercase tracking-wider mb-2">
+                  <ListChecks className="w-4 h-4" /> Multiple Choice — Select one answer
+                </div>
+
+                {mcqQuestions[currentQIndex] ? (
+                  <div className="grid grid-cols-1 gap-3">
+                    {(["A", "B", "C", "D"] as const).map((opt) => {
+                      const optionText = mcqQuestions[currentQIndex].options[opt];
+                      const isSelected = quizAnswer === opt;
+                      const isCorrect = quizResult?.correct_answer === opt;
+                      const isWrong = quizResult && quizAnswer === opt && !quizResult.correct;
+                      return (
+                        <button
+                          key={opt}
+                          type="button"
+                          disabled={!!quizResult}
+                          onClick={() => !quizResult && setQuizAnswer(opt)}
+                          className={`w-full text-left p-4 rounded-xl border text-sm font-medium transition ${
+                            quizResult
+                              ? isCorrect
+                                ? "bg-emerald-500/15 border-emerald-500 text-emerald-300"
+                                : isWrong
+                                  ? "bg-red-500/15 border-red-500 text-red-300"
+                                  : "bg-slate-950 border-slate-800 text-slate-500 opacity-50"
+                              : isSelected
+                                ? "bg-amber-500/15 border-amber-500 text-amber-300"
+                                : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600"
+                          }`}
+                        >
+                          <span className={`inline-flex w-6 h-6 rounded-full items-center justify-center text-xs font-bold mr-3 ${
+                            quizResult
+                              ? isCorrect ? "bg-emerald-500 text-slate-950" : isWrong ? "bg-red-500 text-slate-950" : "bg-slate-800 text-slate-500"
+                              : isSelected ? "bg-amber-500 text-slate-950" : "bg-slate-800 text-slate-400"
+                          }`}>{opt}</span>
+                          {optionText}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-slate-400 text-sm text-center py-6">Loading MCQ questions...</div>
+                )}
+
+                <div className="flex justify-between items-center pt-2">
+                  <div className="text-xs text-slate-500 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-400" /> Answer validated server-side
+                  </div>
+                  {!quizResult ? (
+                    <button
+                      onClick={handleSubmitQuiz}
+                      disabled={!quizAnswer || isSubmittingQuiz}
+                      className="px-6 py-3 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl transition flex items-center gap-2 text-sm shadow-md"
+                    >
+                      {isSubmittingQuiz ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Submit & Check Answer"}
+                    </button>
+                  ) : (
+                    <span className={`text-sm font-bold px-4 py-2 rounded-xl ${
+                      quizResult.correct ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" : "bg-red-500/15 text-red-400 border border-red-500/30"
+                    }`}>
+                      {quizResult.correct ? "✓ Correct! Next question loading..." : `✗ Incorrect — Answer: ${quizResult.correct_answer}`}
+                    </span>
+                  )}
                 </div>
               </div>
             ) : (
@@ -572,35 +753,62 @@ export default function CandidatePage() {
                   <span className="text-sm font-bold text-slate-200 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-amber-400" /> Evaluation Summary for Question #{answersHistory.length}
                   </span>
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    Accuracy: {lastAnalysis.accuracy_score || 85}%
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
+                    mode === "quiz"
+                      ? lastAnalysis.correct
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                        : "bg-red-500/10 text-red-400 border-red-500/20"
+                      : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                  }`}>
+                    {mode === "quiz"
+                      ? (lastAnalysis.correct ? "✓ Correct" : "✗ Incorrect")
+                      : `Accuracy: ${lastAnalysis.accuracy_score || 85}%`}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <div className="text-xs text-slate-500">Overall Grade</div>
-                    <div className="text-lg font-bold text-amber-400 mt-1">{lastAnalysis.overall_score || 88}/100</div>
-                  </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <div className="text-xs text-slate-500">Authenticity Score</div>
-                    <div className="text-lg font-bold text-slate-200 mt-1">{lastAnalysis.authenticity_score}%</div>
-                  </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <div className="text-xs text-slate-500">Word Count</div>
-                    <div className="text-lg font-bold text-slate-200 mt-1">{lastAnalysis.word_count} w</div>
-                  </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <div className="text-xs text-slate-500">Paste Violations</div>
-                    <div className={`text-lg font-bold mt-1 ${lastAnalysis.copy_paste_attempts > 0 ? "text-red-400" : "text-emerald-400"}`}>
-                      {lastAnalysis.copy_paste_attempts || 0}
+                {mode === "quiz" ? (
+                  /* Quiz result layout */
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-center">
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                      <div className="text-xs text-slate-500">Your Answer</div>
+                      <div className={`text-lg font-bold mt-1 ${
+                        lastAnalysis.correct ? "text-emerald-400" : "text-red-400"
+                      }`}>{lastAnalysis.selected_option}) {lastAnalysis.selected_text}</div>
+                    </div>
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                      <div className="text-xs text-slate-500">Correct Answer</div>
+                      <div className="text-lg font-bold text-emerald-400 mt-1">{lastAnalysis.correct_answer}) {lastAnalysis.correct_answer_text}</div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  /* Written / Oral result layout */
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                      <div className="text-xs text-slate-500">Overall Grade</div>
+                      <div className="text-lg font-bold text-amber-400 mt-1">{lastAnalysis.overall_score || 88}/100</div>
+                    </div>
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                      <div className="text-xs text-slate-500">Authenticity Score</div>
+                      <div className="text-lg font-bold text-slate-200 mt-1">{lastAnalysis.authenticity_score}%</div>
+                    </div>
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                      <div className="text-xs text-slate-500">Word Count</div>
+                      <div className="text-lg font-bold text-slate-200 mt-1">{lastAnalysis.word_count} w</div>
+                    </div>
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                      <div className="text-xs text-slate-500">Paste Violations</div>
+                      <div className={`text-lg font-bold mt-1 ${lastAnalysis.copy_paste_attempts > 0 ? "text-red-400" : "text-emerald-400"}`}>
+                        {lastAnalysis.copy_paste_attempts || 0}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {lastAnalysis.conceptual_feedback && (
                   <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 text-xs leading-relaxed text-slate-300">
-                    <strong className="text-amber-400 block mb-1">Conceptual Feedback:</strong>
+                    <strong className="text-amber-400 block mb-1">
+                      {mode === "quiz" ? "Explanation:" : "Conceptual Feedback:"}
+                    </strong>
                     {lastAnalysis.conceptual_feedback}
                   </div>
                 )}

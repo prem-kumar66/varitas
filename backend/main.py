@@ -128,6 +128,8 @@ class SessionStart(BaseModel):
     session_id: str
     candidate_name: str = ""
     roll_number: str = ""
+    mobile_number: str = ""
+    academic_year: str = ""
     role: str = ""
     subject_key: str = ""
     mode: str = "oral"
@@ -161,6 +163,13 @@ class QuestionBankPayload(BaseModel):
     rubric_keywords: list
     max_marks: int = 10
     time_limit_sec: int = 120
+
+class QuizAnswerPayload(BaseModel):
+    session_id: str
+    subject_key: str
+    question_index: int
+    question_text: str
+    selected_option: str  # "A" | "B" | "C" | "D"
 
 class DemoRun(BaseModel):
     session_id: str
@@ -204,6 +213,81 @@ async def add_academic_question(body: QuestionBankPayload):
 async def delete_academic_question(question_id: int):
     await db.db_delete_question(question_id)
     return {"ok": True}
+
+
+# ---------- Quiz (MCQ) Endpoints ----------
+@app.get("/api/quiz/questions")
+async def get_quiz_questions(subject_key: str = "computer_science"):
+    """Return MCQ questions WITHOUT correct_answer — validated server-side only."""
+    questions = templates_mod.get_mcq_questions(subject_key, include_answers=False)
+    if not questions:
+        raise HTTPException(status_code=404, detail=f"No MCQ questions found for subject '{subject_key}'")
+    return {"subject_key": subject_key, "questions": questions, "total": len(questions)}
+
+
+@app.post("/api/quiz/submit")
+async def submit_quiz_answer(payload: QuizAnswerPayload):
+    """Validate a student's MCQ answer server-side and save the result."""
+    result = templates_mod.check_mcq_answer(
+        payload.subject_key, payload.question_index, payload.selected_option
+    )
+    if result is None:
+        raise HTTPException(status_code=400, detail="Invalid question index or subject key")
+
+    now = time.time()
+    sess = get_session(payload.session_id)
+
+    # Build a concise transcript for the DB (the selected option text)
+    transcript = f"Selected: {payload.selected_option}. {result['selected_text']}"
+    score = float(result["score"])
+    accuracy = 100.0 if result["correct"] else 0.0
+    authenticity = 100.0  # MCQ has no authenticity dimension
+    overall = score
+
+    feedback = (
+        f"✓ Correct! {result['explanation']}"
+        if result["correct"]
+        else f"✗ Incorrect. Correct answer: {result['correct_answer']}) {result['correct_answer_text']}. {result['explanation']}"
+    )
+
+    await db.save_answer(
+        session_id=payload.session_id,
+        question=payload.question_text,
+        transcript=transcript,
+        delay_sec=0.0,
+        duration_sec=0.0,
+        word_count=1,
+        risk_score=0.0,
+        authenticity_score=authenticity,
+        signals={},
+        explanations={},
+        evidence={},
+        follow_up=feedback,
+        perplexity=None,
+        is_calibration=False,
+        created_at=now,
+        mode="quiz",
+        accuracy_score=accuracy,
+        overall_score=overall,
+        copy_paste_attempts=0,
+        reference_answer=result["correct_answer_text"],
+        key_points_covered=[result["correct_answer_text"]] if result["correct"] else [],
+        missing_points=[] if result["correct"] else [result["correct_answer_text"]],
+        conceptual_feedback=result["explanation"],
+    )
+
+    return {
+        "correct": result["correct"],
+        "correct_answer": result["correct_answer"],
+        "correct_answer_text": result["correct_answer_text"],
+        "selected_option": result["selected_option"],
+        "selected_text": result["selected_text"],
+        "explanation": result["explanation"],
+        "score": score,
+        "overall_score": overall,
+        "accuracy_score": accuracy,
+        "conceptual_feedback": feedback,
+    }
 
 
 # ---------- Session lifecycle ----------

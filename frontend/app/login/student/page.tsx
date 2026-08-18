@@ -11,12 +11,12 @@ export default function StudentLoginPage() {
 
   // Common Form States
   const [studentName, setStudentName] = useState("");
-  const [rollNumber, setRollNumber] = useState("");
+  const [rollNumber, setRollNumber] = useState("23eg107b35");
   const [mobileNumber, setMobileNumber] = useState("");
   const [academicYear, setAcademicYear] = useState("3rd Year");
   const [department, setDepartment] = useState("computer_science");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"written" | "oral">("written");
+  const [mode, setMode] = useState<"written" | "oral" | "quiz">("written");
 
   const [isLoading, setIsLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -139,7 +139,7 @@ export default function StudentLoginPage() {
                 <input
                   type="text"
                   required
-                  placeholder="23eg107b19"
+                  placeholder="23eg107b35"
                   value={rollNumber}
                   onChange={(e) => setRollNumber(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500 transition font-mono"
@@ -202,7 +202,7 @@ export default function StudentLoginPage() {
                   <input
                     type="text"
                     required
-                    placeholder="23eg107b19"
+                    placeholder="23eg107b35"
                     value={rollNumber}
                     onChange={(e) => setRollNumber(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 pl-10 pr-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500 transition font-mono"

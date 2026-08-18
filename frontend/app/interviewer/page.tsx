@@ -303,6 +303,7 @@ export default function EvaluatorDashboard() {
                   <option value="all">All Modes</option>
                   <option value="written">Written Mode</option>
                   <option value="oral">Oral Mode</option>
+                  <option value="quiz">Quiz Mode</option>
                 </select>
               </div>
             </div>
