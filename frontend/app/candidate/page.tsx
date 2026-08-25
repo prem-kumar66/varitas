@@ -22,7 +22,7 @@ export default function CandidatePage() {
   const [rollNumber, setRollNumber] = useState("");
   const [mobileNumber, setMobileNumber] = useState("");
   const [academicYear, setAcademicYear] = useState("3rd Year");
-  const [selectedSubject, setSelectedSubject] = useState("computer_science");
+  const [selectedSubject, setSelectedSubject] = useState("ai_ml");
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [mode, setMode] = useState<"oral" | "written" | "quiz">("written");
   const [quizAnswer, setQuizAnswer] = useState<string | null>(null);
@@ -84,7 +84,7 @@ export default function CandidatePage() {
         if (data.subjects && data.subjects.length > 0) {
           setSubjects(data.subjects);
           if (!savedAuth) {
-            setSubjectQuestions(data.subjects[0].key || "computer_science");
+            setSubjectQuestions(data.subjects[0].key || "ai_ml");
           }
         }
       })

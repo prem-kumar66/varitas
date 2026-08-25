@@ -66,7 +66,14 @@ class FollowUpGenerator:
         else:
             self.client = Groq(api_key=self.api_key)
 
-    def generate(self, question: str, answer: str, risk_score: float, language: str = "en") -> str:
+    def generate(
+        self,
+        question: str,
+        answer: str,
+        risk_score: float,
+        language: str = "en",
+        context_chunks: Optional[list] = None,
+    ) -> str:
         if not answer.strip() or len(answer.split()) < 5:
             return self._fallback(answer, language)[0]
 
@@ -81,6 +88,11 @@ class FollowUpGenerator:
             else "Generate a thoughtful probe to test deeper understanding."
         )
 
+        rag_prompt_section = ""
+        if context_chunks:
+            top_contexts = "\n".join([f"- {c.get('text', '')[:200]}" for c in context_chunks[:2]])
+            rag_prompt_section = f"\nRelevant Syllabus Context:\n{top_contexts}\nProbe on nuanced application of these concepts."
+
         try:
             response = self.client.chat.completions.create(
                 model="llama-3.1-8b-instant",
@@ -89,6 +101,7 @@ class FollowUpGenerator:
                     {"role": "user", "content":
                         f"Original question: {question}\n\n"
                         f"Candidate's answer: {answer}\n\n"
+                        f"{rag_prompt_section}\n\n"
                         f"{urgency}\n\n"
                         f"Follow-up question:"
                     },

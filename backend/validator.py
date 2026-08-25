@@ -138,24 +138,81 @@ def validate_answer_heuristic(
     }
 
 
+from rag.vectorstore import get_rag_store
+from rag.evaluator import evaluate_with_rag
+
+
 def validate_answer(
     question: str,
     candidate_answer: str,
     reference_answer: str = "",
     rubric_keywords: Optional[List[str]] = None,
+    subject_key: Optional[str] = None,
 ) -> Dict:
-    """Primary entry point for answer key validation."""
+    """
+    Primary entry point for answer key validation.
+    Performs RAG-grounded evaluation when indexed materials are available,
+    with seamless fallback to standard reference answer grading.
+    """
     rubric_keywords = rubric_keywords or []
+    
+    # 1. Attempt RAG Retrieval for the question
+    retrieved_chunks = []
+    try:
+        store = get_rag_store()
+        query = f"{question} {reference_answer}".strip()
+        retrieved_chunks = store.similarity_search(query=query, subject_key=subject_key, top_k=3)
+    except Exception as e:
+        print(f"[Validator] RAG retrieval check: {e}")
+
+    # If RAG chunks found and Groq is active, use RAG evaluation
+    if retrieved_chunks and groq_client:
+        rag_res = evaluate_with_rag(
+            question=question,
+            student_answer=candidate_answer,
+            retrieved_chunks=retrieved_chunks,
+            model_reference_answer=reference_answer,
+        )
+        return {
+            "accuracy_score": float(rag_res.get("conceptual_accuracy", 75.0)),
+            "faithfulness_score": float(rag_res.get("faithfulness_score", 80.0)),
+            "answer_relevance": float(rag_res.get("answer_relevance", 80.0)),
+            "key_points_covered": list(rag_res.get("key_points_covered", [])),
+            "missing_points": list(rag_res.get("missing_points", [])),
+            "citations": list(rag_res.get("citations", [])),
+            "conceptual_feedback": str(rag_res.get("conceptual_feedback", "")),
+            "rag_grounded": True,
+            "retrieved_chunks": retrieved_chunks,
+        }
+
+    # 2. Fallback to standard reference answer LLM validation
     if not reference_answer and not rubric_keywords:
         return {
             "accuracy_score": 85.0,
+            "faithfulness_score": 85.0,
+            "answer_relevance": 85.0,
             "key_points_covered": ["General comprehension"],
             "missing_points": [],
-            "conceptual_feedback": "No reference answer set for this question.",
+            "citations": [],
+            "conceptual_feedback": "No reference answer or syllabus document uploaded for this question.",
+            "rag_grounded": False,
+            "retrieved_chunks": [],
         }
 
     llm_res = validate_answer_llm(question, candidate_answer, reference_answer, rubric_keywords)
     if llm_res is not None:
+        llm_res["faithfulness_score"] = llm_res["accuracy_score"]
+        llm_res["answer_relevance"] = llm_res["accuracy_score"]
+        llm_res["citations"] = []
+        llm_res["rag_grounded"] = False
+        llm_res["retrieved_chunks"] = []
         return llm_res
     
-    return validate_answer_heuristic(question, candidate_answer, reference_answer, rubric_keywords)
+    heur_res = validate_answer_heuristic(question, candidate_answer, reference_answer, rubric_keywords)
+    heur_res["faithfulness_score"] = heur_res["accuracy_score"]
+    heur_res["answer_relevance"] = heur_res["accuracy_score"]
+    heur_res["citations"] = []
+    heur_res["rag_grounded"] = False
+    heur_res["retrieved_chunks"] = []
+    return heur_res
+

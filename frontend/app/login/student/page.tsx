@@ -14,7 +14,7 @@ export default function StudentLoginPage() {
   const [rollNumber, setRollNumber] = useState("23eg107b35");
   const [mobileNumber, setMobileNumber] = useState("");
   const [academicYear, setAcademicYear] = useState("3rd Year");
-  const [department, setDepartment] = useState("computer_science");
+  const [department, setDepartment] = useState("ai_ml");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"written" | "oral" | "quiz">("written");
 
@@ -246,17 +246,14 @@ export default function StudentLoginPage() {
 
             <div>
               <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 mb-1.5">
-                Department
+                Department / Stream
               </label>
               <select
                 value={department}
                 onChange={(e) => setDepartment(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 px-4 text-xs text-slate-200 focus:outline-none focus:border-amber-500 transition"
               >
-                <option value="computer_science">Computer Science & Data Structures</option>
-                <option value="data_science">Data Science & Artificial Intelligence</option>
-                <option value="business_admin">Business Administration & Management</option>
-                <option value="general_aptitude">General Aptitude & Logical Reasoning</option>
+                <option value="ai_ml">Artificial Intelligence & Machine Learning</option>
               </select>
             </div>
 

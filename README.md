@@ -1,6 +1,6 @@
-# Veritas
+# Veritas Academic
 
-**Real-Time Cognitive Authenticity Verification for Remote Interviews**
+**Real-Time Cognitive Authenticity Verification for Academic Viva & College Recruitment**
 
 > Behavioral risk estimation. Not detection. Not a verdict.
 
@@ -19,7 +19,8 @@ Veritas listens to candidate responses, analyzes six behavioral signals, generat
 
 ### Interview workflow
 - **Calibration mode** — establish each candidate's natural baseline before scoring
-- **Role-based question templates**: Backend, Data Science, PM, Frontend, ML Engineer
+- **Subject-based question banks**: Computer Science, Data Science, Business Administration, General Aptitude
+- **MCQ Quiz Mode** — server-side validated multiple-choice questions for technical screening
 - **Pre-recorded demo mode** — 3 scripted scenarios (suspicious, natural, borderline) for reliable demos
 - **Candidate comparison view** — distribution chart + sortable table across all interviews
 
@@ -83,7 +84,7 @@ veritas/
 │   ├── db.py              # Async SQLite persistence
 │   ├── report.py          # ReportLab PDF generator
 │   ├── demo_mode.py       # 3 scripted scenarios
-│   ├── templates.py       # 5 role-based question banks
+│   ├── templates.py       # Academic subjects and MCQ question banks
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/
@@ -187,5 +188,3 @@ The "Why this score?" modal ensures every alert is auditable. The interviewer se
 | GET | `/api/health` | Health check |
 
 ---
-
-Built by Rishik (leoxzayn).

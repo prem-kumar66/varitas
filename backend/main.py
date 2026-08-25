@@ -23,8 +23,10 @@ import wave
 from typing import Dict, Set, Optional
 from contextlib import asynccontextmanager
 
+import aiosqlite
+
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -37,6 +39,9 @@ import db
 import report
 import demo_mode
 import templates as templates_mod
+from rag.vectorstore import get_rag_store
+from rag.ingest import process_document_bytes
+from rag.evaluator import evaluate_with_rag
 
 load_dotenv()
 
@@ -57,7 +62,15 @@ def load_whisper():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
-    # Initialize default academic subjects & question templates into DB
+    
+    # Sync academic subjects & question templates into DB, removing obsolete ones
+    valid_keys = set(templates_mod.SUBJECT_TEMPLATES.keys())
+    async with aiosqlite.connect(db.DB_PATH) as _db:
+        placeholders = ','.join('?' for _ in valid_keys)
+        await _db.execute(f"DELETE FROM subjects WHERE key NOT IN ({placeholders})", list(valid_keys))
+        await _db.execute(f"DELETE FROM questions WHERE subject_key NOT IN ({placeholders})", list(valid_keys))
+        await _db.commit()
+
     for key, template in templates_mod.SUBJECT_TEMPLATES.items():
         await db.db_add_subject(key, template["name"], template["department"])
         existing_q = await db.db_list_questions(key)
@@ -89,6 +102,7 @@ class InterviewSession:
         self.language = language
         self.analyzer = CognitiveAnalyzer(language=language)
         self.follow_up_gen = FollowUpGenerator()
+        self.subject_key: Optional[str] = None
         self.current_question: str = ""
         self.current_reference_answer: str = ""
         self.current_rubric_keywords: list = []
@@ -168,6 +182,18 @@ class QuizAnswerPayload(BaseModel):
     session_id: str
     subject_key: str
     question_index: int
+    selected_option: int
+
+class RAGQueryPayload(BaseModel):
+    query: str
+    subject_key: Optional[str] = None
+    top_k: int = 4
+
+class RAGEvaluatePayload(BaseModel):
+    question: str
+    student_answer: str
+    subject_key: Optional[str] = None
+    reference_answer: Optional[str] = None
     question_text: str
     selected_option: str  # "A" | "B" | "C" | "D"
 
@@ -296,6 +322,7 @@ async def session_start(body: SessionStart):
     started_at = time.time()
     sess = get_session(body.session_id, body.language)
     sess.language = body.language
+    sess.subject_key = body.subject_key or None
     sess.analyzer = CognitiveAnalyzer(language=body.language)
     await db.upsert_session(
         body.session_id, body.candidate_name, body.roll_number,
@@ -582,10 +609,22 @@ async def process_segment(
     scores, risk = sess.analyzer.analyze(seg)
     authenticity = sess.analyzer.authenticity_score(risk)
 
+    # Conceptual validation (with RAG context if available)
+    validation = validate_answer(
+        seg.question,
+        seg.transcript,
+        sess.current_reference_answer,
+        sess.current_rubric_keywords,
+        subject_key=sess.subject_key,
+    )
+    accuracy = float(validation.get("accuracy_score", 75.0))
+    overall_score = round((accuracy * 0.65) + (authenticity * 0.35), 1)
+
     loop = asyncio.get_event_loop()
     follow_up = await loop.run_in_executor(
         None, sess.follow_up_gen.generate,
         seg.question, seg.transcript, risk, sess.language,
+        validation.get("retrieved_chunks"),
     )
 
     signals_dict = {
@@ -611,6 +650,14 @@ async def process_segment(
         "evidence": evidence_dict,
         "risk_score": round(risk, 1),
         "authenticity_score": round(authenticity, 1),
+        "accuracy_score": round(accuracy, 1),
+        "overall_score": overall_score,
+        "faithfulness_score": round(float(validation.get("faithfulness_score", accuracy)), 1),
+        "key_points_covered": validation.get("key_points_covered", []),
+        "missing_points": validation.get("missing_points", []),
+        "citations": validation.get("citations", []),
+        "conceptual_feedback": validation.get("conceptual_feedback", ""),
+        "rag_grounded": bool(validation.get("rag_grounded", False)),
         "follow_up": follow_up,
         "word_count": seg.word_count,
         "perplexity": scores.perplexity_value,
@@ -620,10 +667,29 @@ async def process_segment(
     await sess.broadcast(payload)
 
     await db.save_answer(
-        sess.session_id, seg.question, seg.transcript,
-        seg.answer_start_time - seg.question_end_time, seg.duration_sec, seg.word_count,
-        risk, authenticity, signals_dict, scores.explanations, evidence_dict,
-        follow_up, scores.perplexity_value, False, time.time(),
+        session_id=sess.session_id,
+        question=seg.question,
+        transcript=seg.transcript,
+        delay_sec=seg.answer_start_time - seg.question_end_time,
+        duration_sec=seg.duration_sec,
+        word_count=seg.word_count,
+        risk_score=risk,
+        authenticity_score=authenticity,
+        signals=signals_dict,
+        explanations=scores.explanations,
+        evidence=evidence_dict,
+        follow_up=follow_up,
+        perplexity=scores.perplexity_value,
+        is_calibration=False,
+        created_at=time.time(),
+        mode="oral",
+        accuracy_score=accuracy,
+        overall_score=overall_score,
+        copy_paste_attempts=0,
+        reference_answer=sess.current_reference_answer,
+        key_points_covered=validation.get("key_points_covered", []),
+        missing_points=validation.get("missing_points", []),
+        conceptual_feedback=validation.get("conceptual_feedback", ""),
     )
 
 
@@ -725,6 +791,83 @@ async def interviewer_socket(ws: WebSocket, session_id: str):
     except Exception as e:
         print(f"Interviewer WS error: {e}")
         sess.interviewer_wss.discard(ws)
+
+
+# ---------- RAG Document & Grounding Endpoints ----------
+@app.post("/api/rag/upload")
+async def rag_upload_document(
+    file: UploadFile = File(...),
+    subject_key: str = Form("global"),
+):
+    """Uploads a PDF or text syllabus/material document and indexes it into the FAISS vectorstore."""
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+        chunks = process_document_bytes(content, file.filename)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Could not extract any readable text chunks from document.")
+
+        store = get_rag_store()
+        added_count = store.add_documents(chunks, subject_key=subject_key)
+        return {
+            "ok": True,
+            "filename": file.filename,
+            "subject_key": subject_key,
+            "chunks_added": added_count,
+            "message": f"Successfully indexed {added_count} chunks into '{subject_key}' knowledge base.",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[RAG API] Upload error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/rag/documents")
+async def rag_list_documents(subject_key: Optional[str] = None):
+    """Lists indexed documents and chunks summary."""
+    store = get_rag_store()
+    return {"sources": store.list_indexed_sources(subject_key)}
+
+
+@app.post("/api/rag/query")
+async def rag_query_context(payload: RAGQueryPayload):
+    """Performs similarity search to retrieve top knowledge base chunks for a question."""
+    store = get_rag_store()
+    results = store.similarity_search(
+        query=payload.query,
+        subject_key=payload.subject_key,
+        top_k=payload.top_k,
+    )
+    return {"results": results}
+
+
+@app.post("/api/rag/evaluate")
+async def rag_evaluate_answer(payload: RAGEvaluatePayload):
+    """Runs full RAGAS-style evaluation on a student answer against retrieved syllabus excerpts."""
+    store = get_rag_store()
+    query = f"{payload.question} {payload.reference_answer or ''}".strip()
+    chunks = store.similarity_search(query=query, subject_key=payload.subject_key, top_k=4)
+    eval_result = evaluate_with_rag(
+        question=payload.question,
+        student_answer=payload.student_answer,
+        retrieved_chunks=chunks,
+        model_reference_answer=payload.reference_answer,
+    )
+    return {
+        "evaluation": eval_result,
+        "retrieved_chunks": chunks,
+    }
+
+
+@app.delete("/api/rag/clear/{subject_key}")
+async def rag_clear_subject(subject_key: str):
+    """Clears indexed FAISS vector database for a given subject."""
+    store = get_rag_store()
+    store.clear_index(subject_key)
+    return {"ok": True, "message": f"Index cleared for '{subject_key}'."}
 
 
 @app.get("/api/health")

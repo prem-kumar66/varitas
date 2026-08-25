@@ -14,3 +14,8 @@ torch==2.4.1
 reportlab==4.2.5
 # Persistence
 aiosqlite==0.20.0
+# RAG Engine (Smart-Vision-RAG inspired)
+pypdf>=4.0.0
+faiss-cpu>=1.8.0
+sentence-transformers>=3.0.0
+
