@@ -1,0 +1,156 @@
+[
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p1_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 1,
+    "text": "UNIT II Attacker Techniques and Motivations: How Hackers Cover Their Track, Tunneling Techniques, Fraud Techniques: Phishing, Smishing, Vishing, and Mobile Malicious Code, Rogue Antivirus, Click Fraud. Threat Infrastructure: Botnets, Fast-Flux , Advanced Fast-Flux. https://onlinecourses.nptel.ac.in/e-learning/course/noc26_cs141",
+    "word_count": 34
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p2_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 2,
+    "text": "How Hackers Cover Their Track Masking one\u2019s IP address is a standard practice when conducting illicit activities. A well-configured proxy provides robust anonymity and does not log activity, thereby frustrating law enforcement efforts to identify the original location of the person(s) involved. A proxy allows actors to send network traffic through another computer, which satisfies requests and returns the result. Students or employees can use proxies to communicate with blocked services such as Internet Relay Chat (IRC) and instant messaging or browse websites administrators block. Attackers also use proxies because Internet Protocol (IP) addresses are traceable, Proxies are also a common source of spam e-mail messages, which use open relays. proxies to hide their IP address",
+    "word_count": 116
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p3_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 3,
+    "text": "the victim\u2019s log file contains only one of the many IP addresses that investigators need to locate the attacker. Attackers operate free proxies or alter a victim\u2019s proxy settings because proxies can serve as a monitoring tool. AnonProxy is one example of a malicious proxy that its authors designed to monitor users and steal information such as social-networking passwords Malicious code authors also install local proxies. By altering the host\u2019s file or browser configuration to use the proxy, the attacker redirects requests and captures confidential information. Local proxies are more difficult to identify because the local proxy does not open any network ports and scanning the system will reveal no changes.",
+    "word_count": 111
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p4_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 4,
+    "text": "Types of Proxies Proxies are so common that many attackers scan the Internet for common listening proxy ports. The most common proxies listen on TCP port 80 (HTTP proxies), 8000, 8081, 443, 1080 (SOCKS Proxy), and 3128 (Squid Proxy), and some also handle User Datagram Protocol (UDP). Some lightweight proxies are written in scripting languages, which run with an HTTP server and are easier for attackers to modify. Application proxies require configuration. The Onion Router (Tor)2 also give users the ability to proxy traffic and hide their original location from victims. A virtual private network (VPN) acts as a more versatile proxy and supports more security features. Instead of configuring the application to use a proxy, users can tunnel all traffic through the VPN. VPN services usually support strong authentication and are less likely to leak information that could identify the user of a proxy.",
+    "word_count": 145
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p5_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 5,
+    "text": "Attackers may prefer these services to public proxies because they advertise anonymity and claim they do not keep logs, unlike Tor, where community operators can monitor traffic going through an exit node that it controls. hxxp://secretsline.net \u2022 hxxp://vpn-secure.net \u2022 hxxp://thesafety.us \u2022 hxxp://5socks.net \u2022 hxxp://vpn-service.us \u2022 hxxp://vip72.com \u2022 hxxps://www.cryptovpn.com \u2022 hxxp://www.vipvpn.com \u2022 hxxp://openvpn.ru",
+    "word_count": 52
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p6_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 6,
+    "text": "Operating proxy services is not illegal because it has legitimate purposes related to anonymity for users",
+    "word_count": 16
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p7_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 7,
+    "text": "Detecting the Use of Proxies Detecting proxies is difficult and not always reliable . Since many malicious code authors install custom proxies and use encrypted or custom protocols, it is very difficult to detect all proxies. Port scanning on corporate networks can identify proxies that listen on default ports. The registry key at HKCU\\Software\\Microsoft\\ Windows\\CurrentVersion\\InternetSettings, ProxyServer, controls the proxy settings for Internet Explorer. To detect proxies on the network with intrusion detection systems (IDSs), organizations may use proxy rules available from emergingthreats.net.(https://www.proofpoint.com/us/cyber-threat-hub#weekly-brief )The domain name system blacklist (DNSBL) is one example of a blacklist that allows administrators to block certain proxies",
+    "word_count": 101
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p8_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 8,
+    "text": "The domain name system blacklist (DNSBL) is one example of a blacklist that allows administrators to block certain proxies. As an example, decloak.net is a Metasploit project that uses the following application plug-ins to determine the true IP address of a proxy user: \u2022 Word \u2022 Java \u2022 Flash \u2022 QuickTime \u2022 iTunes iDefense configured a browser to use a proxy and showed that the Flash test correctly identified the real IP address because Flash does not use Internet Explorer proxy settings 2 3 12 13 14 17 21 22 24 25 28 31 34 41 42 44 48 58 59 63 1 2",
+    "word_count": 104
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p9_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 9,
+    "text": "Tunneling Techniques Tunneling data through other protocols often bypasses these controls and may allow sensitive data to exit the network and unwanted data to enter. It is even possible to extend all networks through these means without ever triggering an alert or log entry Data, after all, is no different when it is composed of keystrokes and terminal printouts than when it is simply files sent over FTP , Web requests sent over HTTP , or entire IP packets. tunneling really is\u2014a way to transfer arbitrary data in the payload of a protocol and then potentially interpret them differently or in some other extended way than originally intended.",
+    "word_count": 108
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p11_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 11,
+    "text": "A simple form of traffic tunneling in SSH is the tunneling of a Transmission Control Protocol (TCP) port. When a user configures such tunneling over an SSH session, the protocol simply proxies a TCP connection over the SSH connection, and the content of the TCP connection does not flow directly from source to destination, but rather through the SSH connection. One side of the SSH connection (either server or client) listens on a specified TCP port as the source of the data and transfers all the data to the other side of the SSH connection. This other side then forwards the data to the specified TCP destination. An SSH tunneling configuration can become more complicated because users can configure it to provide a reverse tunnel or arbitrary application proxying through protocols such as SOCKS, but the underlying concept remains the same.",
+    "word_count": 141
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p12_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 12,
+    "text": "The Internet Engineering Task Force Request for Comments (IETF RFC), which has published documents describing protocol standards, defines SSH\u2019s port cleanly so administrators can filter it. The traffic signature, especially the initial handshake, is obvious, and some deep packet inspection tools may block it regardless of what port a user chooses. most common unrestricted protocols in the enterprise\u2014HTTP, the domain name system (DNS), and Internet Control Message Protocol (ICMP) HTTP has become the de facto high-level protocol on the Internet. As the protocol used for accessing content on the World Wide Web, developers adapted it to carry much more than just the static text and images of Web pages. It now carries audio and video streams, can transfer large files, and can even carry application-to-application remote procedure calls (RPCs). 1 2 4 10 14 18 29 37 39 40 44 48 57 3 4",
+    "word_count": 144
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p13_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 13,
+    "text": "attackers need a complete tunnel client and server. Some common software for the task is GNU httptunnel, JHttpTunnel, and Webtunnel. Commercial solutions also exist that almost make the practice appear as legitimate and valid solutions for defeating restrictive\u201d firewalls, such as HTTP Tunnel by netVigilance HTTPS, which is HTTP secured over a secure socket layer (SSL) against eavesdropping and tampering, is no different from HTTP except that it makes detection harder. If a malicious actor cannot eavesdrop, he or she does not have a chance to detect known signatures of tunnels. Proxies that support HTTPS through a CONNECT method may actually make matters far worse, as the CONNECT method simply establishes an arbitrary TCP connection that can send or receive any data",
+    "word_count": 122
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p15_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 15,
+    "text": "The DNS is the core directory service of the Internet. Although the DNS architecture is fundamentally different from that of HTTP , the community designed it to carry different data over a different protocol; however, they share one important aspect: required availability. e DNS is a service that an administrator cannot block and must always make available, it is also a good choice for data exfiltration and tunneling. The most common delivery mechanism for DNS is the UDP , not TCP, so the specifications do not guarantee communication reliability. layout of DNS message packets; the darker areas indicate where software can hide the payload. this setup may require more infrastructure access than just a simple Web server because an attacker must delegate DNS authority to a rogue system . Since the communication requires that the payload be small and latency may be high, DNS tunnels create many packets that tend to be slow and unresponsive. Additionally, complexity may be high because retransmission and other delivery options, which are readily available in a TCP stream, may not be available.",
+    "word_count": 178
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p16_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 16,
+    "text": "NSTX, OzymanDNS, iodine, and heyoka are well established and have been around for years. Services, such asDNStunnel.de, provide tunneling capabilities to those that cannot delegate authority to an \u201cevil\u201d subdomain and make barriers to entry low",
+    "word_count": 36
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p18_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 18,
+    "text": "ICMP is a signaling protocol for IP . It is used mostly to deliver status and error messages when IP-based communication errors occur or to troubleshoot and test connectivity status . its use as a tunnel is mostly to bypass ISP authentication requirements or as a simple covert channel . Most ICMP messages offer little in the way of embedding payload, and implementation details may make it difficult to get the messages delivered; however, ICMP echo messages , which users and administrators alike use to test the accessibility of a host, are well-suited for tunneling . Ping, as the most common software that implements this ICMP mechanism, sends data to a host and expects a reply. Ping Tunnel, ICMPTX, Simple ICMP Tunnel, and Skeeve.19",
+    "word_count": 124
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p19_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 19,
+    "text": "Fraud Techniques(Phishing, Smishing, Vishing, and Mobile Malicious Code) Many phishing attacks against mobile devices use short message service (SMS, or smishing) and voice-over Internet protocol (VoIP , or vishing) to distribute lures and collect personal information. Attackers often send fraudulent SMS messages containing a URL or phone number using traditional phishing themes. Responders either enter their personal information into a fraudulent website, as with traditional e-mail phishing, or, if calling phone numbers, may even provide their information directly to other people. To limit exposure to these growing threats, organizations should not send contact information to users via SMS but instead should be sure phone numbers are readily available on their websites Although rare and only a more recent occurrence, SMS messages sent to mobile devices may also attempt to convince users to install a mobile malicious code. \u2022 hxxp://www.wwqx-mot.com/game \u2022 \u2022 hxxp://www.wwqx-cyw.com/game \u2022 \u2022 hxxp://www.wwqx-sun.com/game",
+    "word_count": 145
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p20_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 20,
+    "text": "Most instances of SMS phishing (smishing) target banks or financial institutions by sending a phone number that the victim calls after receiving the message, resulting in a vishing attack 3,4,11,12,15,18,22,26,31 ,32,36,38,47,49,53,55,58 ,2,3,4,",
+    "word_count": 32
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p21_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 21,
+    "text": "fake antivirus programs have become dramatically more prevalent and are now a major threat to enterprises and home users. Moreover, attackers often bundle this software with stealthier malicious programs. Fortunately, in attackers\u2019 attempts to get users\u2019 attention, rogue antivirus software also alerts administrators to system compromises and inadvertently exposes other malicious software. Attackers aggressively target users with Trojan applications that claim to be antivirus programs. These rogue antivirus applications, once installed, falsely report security issues to mislead victims into purchasing a purported \u201cfull\u201d version, which can cost each victim up to US$89.95. Source: http://www.antiphishing.org/reports/apwg_report_h1_2009.pdf.3 12,13,16,17,21,22,23,24,25,27,29,30,31,33,34,36,37,39,42,47,49,50,51, 57,",
+    "word_count": 96
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p22_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 22,
+    "text": "Many other examples of rogue antivirus applications install by using Web exploit kits. Web exploit kit operators may choose to install rogue antivirus applications to make money, or they may allow third-party groups to purchase installs.",
+    "word_count": 36
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p23_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 23,
+    "text": "Click Fraud advertising model known as pay-per-click (PPC), in which advertisers pay ad publishers each time a potential customer clicks an ad on the publisher\u2019s website. Pay-per-Click Any advertising transaction has three primary parties: the advertiser, the publisher, and the viewer. The advertiser is a company that produces content it would like to display to potential customers. This content is an advertisement for a specific product or service that is likely to generate revenue for the advertiser. The publisher is a creative outlet that produces content that will draw visitors to its medium. These visitors view the ad and, ideally, purchase the advertised product or service. The advertiser pays a fee for a specific number of \u201cimpressions,\u201d which is the estimated number of times a viewer will see the ad. This model is essentially the same across all forms of media, including print, radio, and television.",
+    "word_count": 146
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p24_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 24,
+    "text": "Click Fraud Motivations There are many possible motivations for a person to click an advertisement without any intention to purchase a product or service. An advertiser\u2019s competitor might also be inclined to commit click fraud. Competing publishers might also be motivated to commit click fraud. Nonfinancial motivations might also cause a person to commit click fraud.",
+    "word_count": 56
+  },
+  {
+    "chunk_id": "UNIT II.pptx.pdf_p25_c0",
+    "source": "UNIT II.pptx.pdf",
+    "page": 25,
+    "text": "Click Fraud Tactics and Detection the fraudster must create a website that displays advertisements. A popular way to do this is to create a search engine that only displays advertisements relevant to a queried word. One such search page uses a very unlikely typo of google.com, gooooooooogle.com 2 3 5 6 7 10 14 15 16 17 18 19 20 22 23 24 25 26 28 29 31 32 33 34 35 36 38 39 41 42 45 46 47 48 49 43 51 52 54 55 57 58 59 60 62 63 64 65 66 l1 2 5 6",
+    "word_count": 100
+  }
+]

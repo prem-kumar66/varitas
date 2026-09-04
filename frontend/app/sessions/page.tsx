@@ -40,37 +40,37 @@ export default function SessionsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-8">
+    <div className="min-h-screen bg-[#F8F8F8] text-[#171717] p-8">
       <header className="flex items-center justify-between mb-8 max-w-7xl mx-auto">
         <div>
           <Link
             href="/interviewer"
-            className="text-xs uppercase tracking-wider text-amber-400/80 flex items-center gap-1 hover:text-amber-300 font-semibold mb-2"
+            className="text-xs uppercase tracking-wider text-[#C8102E] flex items-center gap-1 hover:text-[#A50E25] font-semibold mb-2"
           >
             <ArrowLeft className="w-3.5 h-3.5" /> Back to Evaluator Portal
           </Link>
-          <h1 className="text-4xl font-extrabold text-slate-50 flex items-center gap-3">
-            <GraduationCap className="w-9 h-9 text-amber-400" /> Student Assessment Analytics & Comparison
+          <h1 className="text-4xl font-extrabold text-[#171717] flex items-center gap-3">
+            <GraduationCap className="w-9 h-9 text-[#C8102E]" /> Student Assessment Analytics &amp; Comparison
           </h1>
-          <p className="text-sm text-slate-400 mt-1 flex items-center gap-2">
-            <Users className="w-4 h-4 text-amber-400" /> {sessions.length} student recruitment session{sessions.length !== 1 ? "s" : ""} recorded
+          <p className="text-sm text-[#555555] mt-1 flex items-center gap-2">
+            <Users className="w-4 h-4 text-[#C8102E]" /> {sessions.length} student recruitment session{sessions.length !== 1 ? "s" : ""} recorded
           </p>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto space-y-6">
         {loading ? (
-          <p className="text-slate-500">Loading student evaluations...</p>
+          <p className="text-[#555555]">Loading student evaluations...</p>
         ) : sessions.length === 0 ? (
-          <div className="bg-slate-900/60 border border-slate-800 p-12 rounded-2xl text-center">
-            <p className="text-2xl font-bold text-slate-200">No student assessments completed yet</p>
-            <p className="text-sm text-slate-400 mt-2">Students can take assessments from the Student Portal.</p>
+          <div className="bg-white border border-[#E5E5E5] p-12 rounded-2xl text-center shadow-sm">
+            <p className="text-2xl font-bold text-[#171717]">No student assessments completed yet</p>
+            <p className="text-sm text-[#555555] mt-2">Students can take assessments from the Student Portal.</p>
           </div>
         ) : (
           <>
             {/* Score Distribution Chart */}
-            <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl">
-              <h3 className="text-xs uppercase tracking-wider font-bold text-amber-400 mb-6 flex items-center gap-2">
+            <div className="bg-white border border-[#E5E5E5] p-6 rounded-2xl shadow-sm">
+              <h3 className="text-xs uppercase tracking-wider font-bold text-[#C8102E] mb-6 flex items-center gap-2">
                 <TrendingUp className="w-4 h-4" /> Overall Score Distribution across Candidates
               </h3>
               <div className="h-40 flex items-end gap-3">
@@ -83,24 +83,24 @@ export default function SessionsPage() {
                       animate={{ height: `${Math.max(10, score)}%` }}
                       transition={{ duration: 0.6, delay: i * 0.05 }}
                       className={`flex-1 rounded-t-lg transition-all ${
-                        score >= 85 ? "bg-amber-400" : score >= 70 ? "bg-emerald-400" : "bg-red-400"
+                        score >= 85 ? "bg-[#C8102E]" : score >= 70 ? "bg-emerald-400" : "bg-red-300"
                       }`}
                       title={`${s.candidate_name} (${s.roll_number || "N/A"}): ${score.toFixed(1)}/100`}
                     />
                   );
                 })}
               </div>
-              <div className="flex justify-between text-xs text-slate-500 mt-3 pt-2 border-t border-slate-800">
+              <div className="flex justify-between text-xs text-[#555555] mt-3 pt-2 border-t border-[#E5E5E5]">
                 <span>Earliest Session</span>
                 <span>Latest Session</span>
               </div>
             </div>
 
             {/* Student Comparison Table */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden p-6">
+            <div className="bg-white border border-[#E5E5E5] rounded-2xl overflow-hidden p-6 shadow-sm">
               <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                  <tr className="uppercase tracking-wider text-[#555555] border-b border-[#E5E5E5]">
                     <th className="pb-3">Student Name</th>
                     <th className="pb-3">Roll Number</th>
                     <th className="pb-3">Subject</th>
@@ -111,26 +111,26 @@ export default function SessionsPage() {
                     <th className="pb-3 text-right">Report</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody className="divide-y divide-[#E5E5E5]">
                   {sessions.map((s) => (
-                    <tr key={s.id} className="hover:bg-slate-900/60 transition">
-                      <td className="py-4 font-bold text-slate-100">{s.candidate_name || "Unnamed Student"}</td>
-                      <td className="py-4 font-mono text-amber-400">{s.roll_number || "N/A"}</td>
-                      <td className="py-4 text-slate-300">{s.subject_key || s.role || "Computer Science"}</td>
-                      <td className="py-4 uppercase font-semibold text-slate-400">{s.mode || "oral"}</td>
-                      <td className="py-4 text-right font-extrabold text-amber-400 text-sm">
+                    <tr key={s.id} className="hover:bg-[#FFF1F2] transition">
+                      <td className="py-4 font-bold text-[#171717]">{s.candidate_name || "Unnamed Student"}</td>
+                      <td className="py-4 font-mono text-[#C8102E]">{s.roll_number || "N/A"}</td>
+                      <td className="py-4 text-[#555555]">{s.subject_key || s.role || "Computer Science"}</td>
+                      <td className="py-4 uppercase font-semibold text-[#555555]">{s.mode || "oral"}</td>
+                      <td className="py-4 text-right font-extrabold text-[#C8102E] text-sm">
                         {s.avg_overall ? s.avg_overall.toFixed(1) : "85.0"}/100
                       </td>
-                      <td className="py-4 text-right font-bold text-emerald-400">
+                      <td className="py-4 text-right font-bold text-emerald-600">
                         {s.avg_accuracy ? s.avg_accuracy.toFixed(1) : "88.0"}%
                       </td>
-                      <td className="py-4 text-right font-bold text-slate-300">
+                      <td className="py-4 text-right font-bold text-[#555555]">
                         {s.avg_authenticity ? s.avg_authenticity.toFixed(1) : "92.0"}%
                       </td>
                       <td className="py-4 text-right">
                         <button
                           onClick={() => downloadReport(s.id)}
-                          className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-lg transition font-semibold"
+                          className="px-3 py-1.5 bg-[#FFF1F2] hover:bg-[#C8102E]/10 border border-[#C8102E]/30 text-[#C8102E] rounded-lg transition font-semibold"
                         >
                           <Download className="w-3.5 h-3.5 inline mr-1" /> PDF
                         </button>

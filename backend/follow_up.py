@@ -64,7 +64,8 @@ class FollowUpGenerator:
             self.client = None
             print("⚠️  GROQ_API_KEY not set — follow-ups will use fallback templates")
         else:
-            self.client = Groq(api_key=self.api_key)
+            import httpx
+            self.client = Groq(api_key=self.api_key, http_client=httpx.Client())
 
     def generate(
         self,
@@ -95,7 +96,7 @@ class FollowUpGenerator:
 
         try:
             response = self.client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model="qwen/qwen3.8-27b",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content":

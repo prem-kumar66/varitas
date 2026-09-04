@@ -42,6 +42,7 @@ import templates as templates_mod
 from rag.vectorstore import get_rag_store
 from rag.ingest import process_document_bytes
 from rag.evaluator import evaluate_with_rag
+from generator import AssessmentGenerator
 
 load_dotenv()
 
@@ -55,7 +56,7 @@ def load_whisper():
         from faster_whisper import WhisperModel
         print(f"Loading Whisper model: {WHISPER_MODEL_NAME}...")
         whisper_model = WhisperModel(WHISPER_MODEL_NAME, device="cpu", compute_type="int8")
-        print("✓ Whisper loaded")
+        print("[OK] Whisper loaded")
     return whisper_model
 
 
@@ -204,6 +205,26 @@ class DemoRun(BaseModel):
 class FinalizeBody(BaseModel):
     session_id: str
 
+class AssessmentGeneratePayload(BaseModel):
+    prompt: str
+    subject_key: str
+    mode: str
+    num_questions: int = 5
+    difficulty: str = "medium"
+
+class AssessmentPublishPayload(BaseModel):
+    exam_id: str
+    name: str
+    mode: str
+    subject: str = ""
+    unit: str = ""
+    department: str = ""
+    year: str = ""
+    section: str = ""
+    source_pdf: str = ""
+    teacher: str = ""
+    difficulty: str = "medium"
+    questions: list
 
 # ---------- Academic Question Bank APIs ----------
 @app.get("/api/academic/subjects")
@@ -868,6 +889,89 @@ async def rag_clear_subject(subject_key: str):
     store = get_rag_store()
     store.clear_index(subject_key)
     return {"ok": True, "message": f"Index cleared for '{subject_key}'."}
+
+
+# ---------- Assessments ----------
+@app.post("/api/assessments/generate")
+async def generate_assessment(payload: AssessmentGeneratePayload):
+    store = get_rag_store()
+    
+    print(f"\n--- [DEBUG] TEACHER AI RETRIEVAL ---")
+    print(f"1. Query received: {payload.prompt}")
+    print(f"2. Filters/metadata used: subject_key='{payload.subject_key}'")
+    
+    # Step 1: Search the specific subject key
+    chunks = store.similarity_search(query=payload.prompt, subject_key=payload.subject_key, top_k=10)
+    
+    # Step 2: If no results from specific key, broaden to all indexed subjects
+    if not chunks:
+        print(f"[Generate] No chunks found for subject_key='{payload.subject_key}'. Searching all indices.")
+        chunks = store.similarity_search(query=payload.prompt, subject_key=None, top_k=10)
+    
+    print(f"3. Number of chunks retrieved: {len(chunks)}")
+    if chunks:
+        doc_names = list(set([c.get('source', 'Unknown') for c in chunks]))
+        print(f"4. Names of retrieved documents: {doc_names}")
+        print(f"5. Chunks sent to Groq/Llama (first 2 previews):")
+        for i, c in enumerate(chunks[:2]):
+            print(f"   - Chunk {i+1} [{c.get('source')}]: {c.get('text', '')[:100]}...")
+    print(f"------------------------------------\n")
+    
+    # Step 4: Generate questions from chunks (raises ValueError if no content)
+    generator = AssessmentGenerator()
+    try:
+        questions = generator.generate(
+            prompt=payload.prompt,
+            mode=payload.mode,
+            num_questions=payload.num_questions,
+            difficulty=payload.difficulty,
+            context_chunks=chunks,
+        )
+    except ValueError as e:
+        if "NO_RAG_CONTENT" in str(e):
+            raise HTTPException(
+                status_code=422,
+                detail="No relevant content found in the uploaded documents. Please upload a PDF first in the Syllabus & RAG section, then try again."
+            )
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    return {"questions": questions}
+
+
+
+@app.post("/api/assessments")
+async def publish_assessment(payload: AssessmentPublishPayload):
+    now = time.time()
+    await db.db_save_assessment(
+        exam_id=payload.exam_id,
+        name=payload.name,
+        mode=payload.mode,
+        subject=payload.subject,
+        unit=payload.unit,
+        department=payload.department,
+        year=payload.year,
+        section=payload.section,
+        source_pdf=payload.source_pdf,
+        teacher=payload.teacher,
+        difficulty=payload.difficulty,
+        questions=payload.questions,
+        created_at=now,
+    )
+    return {"ok": True, "exam_id": payload.exam_id}
+
+
+@app.get("/api/assessments")
+async def list_assessments(department: Optional[str] = None, year: Optional[str] = None):
+    assessments = await db.db_list_assessments(department, year)
+    return {"assessments": assessments}
+
+
+@app.get("/api/assessments/{exam_id}")
+async def get_assessment(exam_id: str):
+    assessment = await db.db_get_assessment(exam_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    return {"assessment": assessment}
 
 
 @app.get("/api/health")

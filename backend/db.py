@@ -75,6 +75,22 @@ CREATE TABLE IF NOT EXISTS answers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_answers_session ON answers(session_id);
+
+CREATE TABLE IF NOT EXISTS assessments (
+    exam_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    subject TEXT,
+    unit TEXT,
+    department TEXT,
+    year TEXT,
+    section TEXT,
+    source_pdf TEXT,
+    teacher TEXT,
+    difficulty TEXT,
+    questions_json TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -321,4 +337,79 @@ async def db_delete_question(question_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM questions WHERE id = ?", (question_id,))
         await db.commit()
+
+# ---------- Assessments ----------
+async def db_save_assessment(
+    exam_id: str,
+    name: str,
+    mode: str,
+    subject: str,
+    unit: str,
+    department: str,
+    year: str,
+    section: str,
+    source_pdf: str,
+    teacher: str,
+    difficulty: str,
+    questions: List[Dict],
+    created_at: float,
+):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO assessments (exam_id, name, mode, subject, unit, department, year, section, source_pdf, teacher, difficulty, questions_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(exam_id) DO UPDATE SET
+                   name = excluded.name,
+                   mode = excluded.mode,
+                   subject = excluded.subject,
+                   unit = excluded.unit,
+                   department = excluded.department,
+                   year = excluded.year,
+                   section = excluded.section,
+                   source_pdf = excluded.source_pdf,
+                   teacher = excluded.teacher,
+                   difficulty = excluded.difficulty,
+                   questions_json = excluded.questions_json
+            """,
+            (exam_id, name, mode, subject, unit, department, year, section, source_pdf, teacher, difficulty, json.dumps(questions), created_at)
+        )
+        await db.commit()
+
+async def db_list_assessments(department: Optional[str] = None, year: Optional[str] = None) -> List[Dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        sql = "SELECT * FROM assessments"
+        args = []
+        conditions = []
+        if department:
+            conditions.append("department = ?")
+            args.append(department)
+        if year:
+            conditions.append("year = ?")
+            args.append(year)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY created_at DESC"
+        
+        async with db.execute(sql, tuple(args)) as cur:
+            rows = await cur.fetchall()
+            res = []
+            for r in rows:
+                d = dict(r)
+                if d.get("questions_json"):
+                    d["questions"] = json.loads(d["questions_json"])
+                res.append(d)
+            return res
+
+async def db_get_assessment(exam_id: str) -> Optional[Dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM assessments WHERE exam_id = ?", (exam_id,)) as cur:
+            row = await cur.fetchone()
+            if row:
+                d = dict(row)
+                if d.get("questions_json"):
+                    d["questions"] = json.loads(d["questions_json"])
+                return d
+            return None
 

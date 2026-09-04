@@ -11,7 +11,15 @@ import {
 const BACKEND_HTTP = process.env.NEXT_PUBLIC_BACKEND_HTTP || "http://localhost:8000";
 const BACKEND_WS = process.env.NEXT_PUBLIC_BACKEND_WS || "ws://localhost:8000";
 
-type Subject = { key: string; label?: string; name?: string; department: string; count?: number };
+type Assessment = {
+  exam_id: string;
+  name: string;
+  mode: string;
+  department: string;
+  year: string;
+  questions: any[];
+};
+
 type Question = { id?: number; question_text: string; reference_answer?: string; rubric_keywords?: string[]; max_marks?: number; time_limit_sec?: number };
 type MCQQuestion = { index: number; question: string; options: { A: string; B: string; C: string; D: string } };
 
@@ -22,8 +30,8 @@ export default function CandidatePage() {
   const [rollNumber, setRollNumber] = useState("");
   const [mobileNumber, setMobileNumber] = useState("");
   const [academicYear, setAcademicYear] = useState("3rd Year");
-  const [selectedSubject, setSelectedSubject] = useState("ai_ml");
-  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [selectedAssessmentId, setSelectedAssessmentId] = useState("");
   const [mode, setMode] = useState<"oral" | "written" | "quiz">("written");
   const [quizAnswer, setQuizAnswer] = useState<string | null>(null);
   const [mcqQuestions, setMcqQuestions] = useState<MCQQuestion[]>([]);
@@ -60,35 +68,35 @@ export default function CandidatePage() {
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
 
-  // Fetch subjects on mount & read saved student login session
   useEffect(() => {
     const savedAuth = localStorage.getItem("veritas_student_auth");
+    let savedDept = "";
+    let savedYear = "";
     if (savedAuth) {
       try {
         const auth = JSON.parse(savedAuth);
         if (auth.studentName) setStudentName(auth.studentName);
         if (auth.rollNumber) setRollNumber(auth.rollNumber);
         if (auth.mobileNumber) setMobileNumber(auth.mobileNumber);
-        if (auth.academicYear) setAcademicYear(auth.academicYear);
-        if (auth.mode) setMode(auth.mode);
+        if (auth.academicYear) {
+          setAcademicYear(auth.academicYear);
+          savedYear = auth.academicYear;
+        }
         if (auth.department) {
-          setSelectedSubject(auth.department);
-          setSubjectQuestions(auth.department);
+          savedDept = auth.department;
         }
       } catch (e) {}
     }
 
-    fetch(`${BACKEND_HTTP}/api/academic/subjects`)
+    fetch(`${BACKEND_HTTP}/api/assessments`)
       .then((res) => res.json())
       .then((data) => {
-        if (data.subjects && data.subjects.length > 0) {
-          setSubjects(data.subjects);
-          if (!savedAuth) {
-            setSubjectQuestions(data.subjects[0].key || "ai_ml");
-          }
+        if (data.assessments && data.assessments.length > 0) {
+          setAssessments(data.assessments);
+          handleAssessmentSelect(data.assessments[0].exam_id, data.assessments);
         }
       })
-      .catch((err) => console.error("Error fetching subjects:", err));
+      .catch((err) => console.error("Error fetching assessments:", err));
   }, []);
 
   const handleStudentLogout = () => {
@@ -96,72 +104,31 @@ export default function CandidatePage() {
     router.push("/login/student");
   };
 
-  // Fetch TEXT questions (Written / Oral modes)
-  const fetchTextQuestions = (subjKey: string) => {
-    setSelectedSubject(subjKey);
-    fetch(`${BACKEND_HTTP}/api/academic/questions?subject_key=${subjKey}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.questions && data.questions.length > 0) {
-          setQuestions(data.questions.map((q: any) => ({
-            id: q.id,
-            question_text: q.question_text || q.question,
-            reference_answer: q.reference_answer,
-            rubric_keywords: q.rubric_keywords_list || q.rubric_keywords,
-            max_marks: q.max_marks || 10,
-            time_limit_sec: q.time_limit_sec || 120,
-          })));
-        } else {
-          // Fallback templates
-          fetch(`${BACKEND_HTTP}/api/templates/${subjKey}`)
-            .then((r) => r.json())
-            .then((tmpl) => {
-              if (tmpl.questions) {
-                setQuestions(tmpl.questions.map((q: any) => typeof q === "string" ? { question_text: q } : { question_text: q.question || q.question_text, reference_answer: q.reference_answer, rubric_keywords: q.rubric_keywords, max_marks: q.max_marks, time_limit_sec: q.time_limit_sec }));
-              }
-            }).catch(() => {});
-        }
-      });
-  };
-
-  // Fetch MCQ questions (Quiz mode only) — correct_answer NOT included in response
-  const fetchQuizQuestions = (subjKey: string) => {
-    setSelectedSubject(subjKey);
-    fetch(`${BACKEND_HTTP}/api/quiz/questions?subject_key=${subjKey}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.questions && data.questions.length > 0) {
-          setMcqQuestions(data.questions as MCQQuestion[]);
-        }
-      })
-      .catch((err) => console.error("Error fetching quiz questions:", err));
-  };
-
-  // Mode-aware subject change handler
-  const handleSubjectChange = (subjKey: string) => {
-    if (mode === "quiz") {
-      fetchQuizQuestions(subjKey);
-    } else {
-      fetchTextQuestions(subjKey);
+  const handleAssessmentSelect = (examId: string, allAssessments = assessments) => {
+    setSelectedAssessmentId(examId);
+    const assessment = allAssessments.find((a) => a.exam_id === examId);
+    if (assessment) {
+      setMode(assessment.mode as "oral" | "written" | "quiz");
+      if (assessment.mode === "quiz") {
+        setMcqQuestions(assessment.questions.map((q, idx) => ({
+          index: idx,
+          question: q.question,
+          options: q.options || { A: "", B: "", C: "", D: "" }
+        })));
+        setQuestions([]);
+      } else {
+        setQuestions(assessment.questions.map((q, idx) => ({
+          id: idx,
+          question_text: q.question,
+          reference_answer: q.reference_answer,
+          rubric_keywords: q.rubric_keywords || [],
+          max_marks: 10,
+          time_limit_sec: 120
+        })));
+        setMcqQuestions([]);
+      }
     }
   };
-
-  // Mode-aware mode toggle
-  const handleModeChange = (newMode: "written" | "oral" | "quiz") => {
-    setMode(newMode);
-    setCurrentQIndex(0);
-    setLastAnalysis(null);
-    setQuizAnswer(null);
-    setQuizResult(null);
-    if (newMode === "quiz") {
-      fetchQuizQuestions(selectedSubject);
-    } else {
-      fetchTextQuestions(selectedSubject);
-    }
-  };
-
-  // Keep the old name as alias for backward compat with the useEffect call
-  const setSubjectQuestions = fetchTextQuestions;
 
   // Start Assessment Session
   const handleStartSession = async (e: React.FormEvent) => {
@@ -181,7 +148,7 @@ export default function CandidatePage() {
           roll_number: rollNumber,
           mobile_number: mobileNumber,
           academic_year: academicYear,
-          subject_key: selectedSubject,
+          subject_key: selectedAssessmentId,
           mode: mode,
         }),
       });
@@ -299,7 +266,7 @@ export default function CandidatePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: sessionId,
-          subject_key: selectedSubject,
+          subject_key: selectedAssessmentId,
           question_index: activeMCQ.index,
           question_text: activeMCQ.question,
           selected_option: quizAnswer,
@@ -395,32 +362,32 @@ export default function CandidatePage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#F8F8F8] text-[#171717] flex flex-col font-sans">
       {/* Header */}
-      <header className="px-8 py-5 border-b border-slate-800 bg-slate-900/60 backdrop-blur-md flex justify-between items-center">
+      <header className="px-8 py-5 border-b border-[#E5E5E5] bg-white backdrop-blur-md flex justify-between items-center">
         <Link href="/" className="flex items-center gap-3">
-          <div className="p-2 bg-amber-500/10 rounded-lg border border-amber-500/30">
-            <BookOpen className="w-5 h-5 text-amber-400" />
+          <div className="p-2 bg-[#FFF1F2] rounded-lg border border-[#C8102E]/30">
+            <BookOpen className="w-5 h-5 text-[#C8102E]" />
           </div>
           <div>
-            <span className="font-bold text-lg text-slate-100">VERITAS ACADEMIC</span>
-            <span className="block text-[10px] uppercase tracking-widest text-slate-400">Student Assessment Portal</span>
+            <span className="font-bold text-lg text-[#171717]">VERITAS ACADEMIC</span>
+            <span className="block text-[10px] uppercase tracking-widest text-[#555555]">Student Assessment Portal</span>
           </div>
         </Link>
         <div className="flex items-center gap-4 text-xs">
           {sessionStarted && (
             <>
-              <span className="px-3 py-1 bg-slate-800 border border-slate-700 rounded-full text-slate-300">
-                <User className="w-3.5 h-3.5 inline mr-1 text-amber-400" /> {studentName} ({rollNumber})
+              <span className="px-3 py-1 bg-[#E5E5E5] border border-[#D4D4D4] rounded-full text-[#555555]">
+                <User className="w-3.5 h-3.5 inline mr-1 text-[#C8102E]" /> {studentName} ({rollNumber})
               </span>
-              <span className="px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-full text-amber-300 capitalize font-medium">
+              <span className="px-3 py-1 bg-[#FFF1F2] border border-[#C8102E]/30 rounded-full text-[#C8102E] capitalize font-medium">
                 {mode} Assessment Mode
               </span>
             </>
           )}
           <button
             onClick={handleStudentLogout}
-            className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl transition text-xs font-semibold"
+            className="px-3.5 py-1.5 bg-[#E5E5E5] hover:bg-[#D4D4D4] text-[#555555] border border-[#D4D4D4] rounded-xl transition text-xs font-semibold"
           >
             Log Out
           </button>
@@ -434,123 +401,88 @@ export default function CandidatePage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 max-w-xl mx-auto w-full shadow-2xl"
+            className="bg-white border border-[#E5E5E5] rounded-2xl p-8 max-w-xl mx-auto w-full shadow-2xl"
           >
             <div className="text-center mb-8">
-              <h2 className="text-2xl font-bold text-slate-50">Student Registration & Mode Choice</h2>
-              <p className="text-sm text-slate-400 mt-2">Enter your academic details and select your preferred interview mode.</p>
+              <h2 className="text-2xl font-bold text-[#171717]">Student Registration & Mode Choice</h2>
+              <p className="text-sm text-[#555555] mt-2">Enter your academic details and select your preferred interview mode.</p>
             </div>
 
             <form onSubmit={handleStartSession} className="space-y-6">
               <div>
-                <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 mb-2">
+                <label className="block text-xs uppercase tracking-wider font-semibold text-[#555555] mb-2">
                   Full Name
                 </label>
                 <div className="relative">
-                  <User className="w-5 h-5 absolute left-3.5 top-3.5 text-slate-500" />
+                  <User className="w-5 h-5 absolute left-3.5 top-3.5 text-[#555555]" />
                   <input
                     type="text"
                     required
                     placeholder="e.g. Rahul Sharma"
                     value={studentName}
                     onChange={(e) => setStudentName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-4 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500 transition text-sm"
+                    className="w-full bg-[#F8F8F8] border border-[#E5E5E5] rounded-xl py-3 pl-11 pr-4 text-[#171717] placeholder-slate-600 focus:outline-none focus:border-[#C8102E] transition text-sm"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 mb-2">
+                <label className="block text-xs uppercase tracking-wider font-semibold text-[#555555] mb-2">
                   Roll Number / Student ID
                 </label>
                 <div className="relative">
-                  <Hash className="w-5 h-5 absolute left-3.5 top-3.5 text-slate-500" />
+                  <Hash className="w-5 h-5 absolute left-3.5 top-3.5 text-[#555555]" />
                   <input
                     type="text"
                     required
                     placeholder="23eg107b19"
                     value={rollNumber}
                     onChange={(e) => setRollNumber(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-4 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500 transition text-sm font-mono"
+                    className="w-full bg-[#F8F8F8] border border-[#E5E5E5] rounded-xl py-3 pl-11 pr-4 text-[#171717] placeholder-slate-600 focus:outline-none focus:border-[#C8102E] transition text-sm font-mono"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 mb-2">
-                  Department / Subject
+                <label className="block text-xs uppercase tracking-wider font-semibold text-[#555555] mb-2">
+                  Select Published Assessment
                 </label>
-                <select
-                  value={selectedSubject}
-                  onChange={(e) => handleSubjectChange(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-slate-100 focus:outline-none focus:border-amber-500 transition text-sm"
-                >
-                  {subjects.map((s) => (
-                    <option key={s.key} value={s.key}>
-                      {s.name || s.label} ({s.department})
-                    </option>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {assessments.length === 0 && (
+                    <div className="col-span-2 p-4 text-sm text-center text-gray-500 border rounded-xl">
+                      No published assessments found.
+                    </div>
+                  )}
+                  {assessments.map((assessment) => (
+                    <button
+                      key={assessment.exam_id}
+                      type="button"
+                      onClick={() => handleAssessmentSelect(assessment.exam_id)}
+                      className={`text-left p-4 rounded-xl border transition flex flex-col ${
+                        selectedAssessmentId === assessment.exam_id
+                          ? "border-[#C8102E] bg-[#FFF1F2]"
+                          : "border-[#E5E5E5] bg-white hover:border-[#A3A3A3]"
+                      }`}
+                    >
+                      <span className={`font-bold text-sm ${
+                        selectedAssessmentId === assessment.exam_id ? "text-[#C8102E]" : "text-[#171717]"
+                      }`}>
+                        {assessment.name}
+                      </span>
+                      <span className="text-xs text-[#555555] mt-1 capitalize">
+                        Mode: {assessment.mode}
+                      </span>
+                      <span className="text-xs text-[#555555]">
+                        Questions: {assessment.questions.length}
+                      </span>
+                    </button>
                   ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs uppercase tracking-wider font-semibold text-slate-400 mb-3">
-                  Select Interview Mode
-                </label>
-                <div className="grid grid-cols-3 gap-4">
-                  <button
-                    type="button"
-                    onClick={() => handleModeChange("written")}
-                    className={`p-4 rounded-xl border text-left transition flex flex-col gap-2 ${
-                      mode === "written"
-                        ? "bg-amber-500/10 border-amber-500 text-amber-300"
-                        : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
-                    }`}
-                  >
-                    <Edit3 className="w-6 h-6 text-amber-400" />
-                    <div>
-                      <div className="font-bold text-sm text-slate-100">Written (Text)</div>
-                      <div className="text-[11px] text-slate-400 mt-1">Timed typing with paste-prohibition & anti-cheat analytics</div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleModeChange("oral")}
-                    className={`p-4 rounded-xl border text-left transition flex flex-col gap-2 ${
-                      mode === "oral"
-                        ? "bg-amber-500/10 border-amber-500 text-amber-300"
-                        : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
-                    }`}
-                  >
-                    <Mic className="w-6 h-6 text-amber-400" />
-                    <div>
-                      <div className="font-bold text-sm text-slate-100">Oral (Voice)</div>
-                      <div className="text-[11px] text-slate-400 mt-1">Spoken answer capture via mic + Whisper transcription</div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleModeChange("quiz")}
-                    className={`p-4 rounded-xl border text-left transition flex flex-col gap-2 ${
-                      mode === "quiz"
-                        ? "bg-amber-500/10 border-amber-500 text-amber-300"
-                        : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
-                    }`}
-                  >
-                    <ListChecks className="w-6 h-6 text-amber-400" />
-                    <div>
-                      <div className="font-bold text-sm text-slate-100">Quiz (MCQ)</div>
-                      <div className="text-[11px] text-slate-400 mt-1">Multiple-choice questions with instant AI scoring</div>
-                    </div>
-                  </button>
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl transition shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 text-sm"
+                className="w-full py-4 bg-gradient-to-r from-[#C8102E] to-[#A50E25] hover:from-[#A50E25] hover:to-[#8B0B1F] text-slate-950 font-bold rounded-xl transition shadow-lg shadow-sm flex items-center justify-center gap-2 text-sm"
               >
                 Begin Assessment <ArrowRight className="w-4 h-4" />
               </button>
@@ -560,14 +492,14 @@ export default function CandidatePage() {
           /* STEP 2: Active Assessment Panel */
           <div className="space-y-6">
             {/* Question Progress Header */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 flex justify-between items-center">
+            <div className="bg-white border border-[#E5E5E5] rounded-2xl p-6 flex justify-between items-center">
               <div>
-                <span className="text-xs uppercase tracking-wider font-semibold text-amber-400">
+                <span className="text-xs uppercase tracking-wider font-semibold text-[#C8102E]">
                   {mode === "quiz"
                     ? `Question ${currentQIndex + 1} of ${mcqQuestions.length}`
                     : `Question ${currentQIndex + 1} of ${questions.length}`}
                 </span>
-                <h3 className="text-xl font-bold text-slate-100 mt-1">
+                <h3 className="text-xl font-bold text-[#171717] mt-1">
                   {mode === "quiz"
                     ? (mcqQuestions[currentQIndex]?.question || "Loading question...")
                     : (questions[currentQIndex]?.question_text || "Loading question...")}
@@ -576,14 +508,14 @@ export default function CandidatePage() {
               <div className="text-right">
                 {mode !== "quiz" && (
                   <>
-                    <span className="text-xs text-slate-400 block">Max Marks: {questions[currentQIndex]?.max_marks || 10}</span>
-                    <span className="text-xs text-slate-400 flex items-center gap-1 mt-1">
-                      <Clock className="w-3.5 h-3.5 text-amber-400" /> Time Limit: {questions[currentQIndex]?.time_limit_sec || 120}s
+                    <span className="text-xs text-[#555555] block">Max Marks: {questions[currentQIndex]?.max_marks || 10}</span>
+                    <span className="text-xs text-[#555555] flex items-center gap-1 mt-1">
+                      <Clock className="w-3.5 h-3.5 text-[#C8102E]" /> Time Limit: {questions[currentQIndex]?.time_limit_sec || 120}s
                     </span>
                   </>
                 )}
                 {mode === "quiz" && (
-                  <span className="text-xs text-slate-400 block">10 marks · Select one</span>
+                  <span className="text-xs text-[#555555] block">10 marks · Select one</span>
                 )}
               </div>
             </div>
@@ -607,8 +539,8 @@ export default function CandidatePage() {
 
             {mode === "written" ? (
               /* WRITTEN TEXT AREA — open-ended subjective questions */
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4">
-                <div className="flex justify-between items-center text-xs text-slate-400">
+              <div className="bg-white border border-[#E5E5E5] rounded-2xl p-6 space-y-4">
+                <div className="flex justify-between items-center text-xs text-[#555555]">
                   <span>Type your detailed answer below:</span>
                   <span className="font-mono">{writtenAnswer.split(/\s+/).filter(Boolean).length} words | {writtenAnswer.length} chars</span>
                 </div>
@@ -619,17 +551,17 @@ export default function CandidatePage() {
                   value={writtenAnswer}
                   onChange={(e) => setWrittenAnswer(e.target.value)}
                   placeholder="Explain your conceptual response clearly..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-slate-100 focus:outline-none focus:border-amber-500 transition text-sm font-sans resize-none leading-relaxed"
+                  className="w-full bg-[#F8F8F8] border border-[#E5E5E5] rounded-xl p-4 text-[#171717] focus:outline-none focus:border-[#C8102E] transition text-sm font-sans resize-none leading-relaxed"
                 />
 
                 <div className="flex justify-between items-center pt-2">
-                  <div className="text-xs text-slate-500 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-amber-400" /> Anti-paste & typing cadence monitor active
+                  <div className="text-xs text-[#555555] flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-[#C8102E]" /> Anti-paste & typing cadence monitor active
                   </div>
                   <button
                     onClick={handleSubmitWritten}
                     disabled={!writtenAnswer.trim() || isSubmittingWritten}
-                    className="px-6 py-3 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl transition flex items-center gap-2 text-sm shadow-md"
+                    className="px-6 py-3 bg-[#C8102E] hover:bg-[#A50E25] disabled:opacity-50 text-slate-950 font-bold rounded-xl transition flex items-center gap-2 text-sm shadow-md"
                   >
                     {isSubmittingWritten ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Submit Answer & Continue"}
                   </button>
@@ -637,8 +569,8 @@ export default function CandidatePage() {
               </div>
             ) : mode === "quiz" ? (
               /* QUIZ MCQ INTERFACE — separate MCQ question bank, not the same as Written/Oral */
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4">
-                <div className="flex items-center gap-2 text-xs text-amber-400 font-semibold uppercase tracking-wider mb-2">
+              <div className="bg-white border border-[#E5E5E5] rounded-2xl p-6 space-y-4">
+                <div className="flex items-center gap-2 text-xs text-[#C8102E] font-semibold uppercase tracking-wider mb-2">
                   <ListChecks className="w-4 h-4" /> Multiple Choice — Select one answer
                 </div>
 
@@ -661,16 +593,16 @@ export default function CandidatePage() {
                                 ? "bg-emerald-500/15 border-emerald-500 text-emerald-300"
                                 : isWrong
                                   ? "bg-red-500/15 border-red-500 text-red-300"
-                                  : "bg-slate-950 border-slate-800 text-slate-500 opacity-50"
+                                  : "bg-[#F8F8F8] border-[#E5E5E5] text-[#555555] opacity-50"
                               : isSelected
-                                ? "bg-amber-500/15 border-amber-500 text-amber-300"
-                                : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-600"
+                                ? "bg-[#FFF1F2] border-[#C8102E] text-[#C8102E]"
+                                : "bg-[#F8F8F8] border-[#E5E5E5] text-[#555555] hover:border-slate-600"
                           }`}
                         >
                           <span className={`inline-flex w-6 h-6 rounded-full items-center justify-center text-xs font-bold mr-3 ${
                             quizResult
-                              ? isCorrect ? "bg-emerald-500 text-slate-950" : isWrong ? "bg-red-500 text-slate-950" : "bg-slate-800 text-slate-500"
-                              : isSelected ? "bg-amber-500 text-slate-950" : "bg-slate-800 text-slate-400"
+                              ? isCorrect ? "bg-emerald-500 text-slate-950" : isWrong ? "bg-red-500 text-slate-950" : "bg-[#E5E5E5] text-[#555555]"
+                              : isSelected ? "bg-[#C8102E] text-slate-950" : "bg-[#E5E5E5] text-[#555555]"
                           }`}>{opt}</span>
                           {optionText}
                         </button>
@@ -678,18 +610,18 @@ export default function CandidatePage() {
                     })}
                   </div>
                 ) : (
-                  <div className="text-slate-400 text-sm text-center py-6">Loading MCQ questions...</div>
+                  <div className="text-[#555555] text-sm text-center py-6">Loading MCQ questions...</div>
                 )}
 
                 <div className="flex justify-between items-center pt-2">
-                  <div className="text-xs text-slate-500 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-amber-400" /> Answer validated server-side
+                  <div className="text-xs text-[#555555] flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-[#C8102E]" /> Answer validated server-side
                   </div>
                   {!quizResult ? (
                     <button
                       onClick={handleSubmitQuiz}
                       disabled={!quizAnswer || isSubmittingQuiz}
-                      className="px-6 py-3 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl transition flex items-center gap-2 text-sm shadow-md"
+                      className="px-6 py-3 bg-[#C8102E] hover:bg-[#A50E25] disabled:opacity-50 text-slate-950 font-bold rounded-xl transition flex items-center gap-2 text-sm shadow-md"
                     >
                       {isSubmittingQuiz ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Submit & Check Answer"}
                     </button>
@@ -704,17 +636,17 @@ export default function CandidatePage() {
               </div>
             ) : (
               /* ORAL VOICE INTERFACE */
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-8 text-center space-y-6">
+              <div className="bg-white border border-[#E5E5E5] rounded-2xl p-8 text-center space-y-6">
                 <div className="flex justify-center items-center gap-3">
                   <div className={`w-3 h-3 rounded-full ${joined ? "bg-emerald-500 animate-pulse" : "bg-slate-600"}`} />
-                  <span className="text-xs font-mono text-slate-400">{status}</span>
+                  <span className="text-xs font-mono text-[#555555]">{status}</span>
                 </div>
 
                 <div className="py-6">
                   {!speaking ? (
                     <button
                       onClick={startSpeaking}
-                      className="w-24 h-24 rounded-full bg-amber-500/10 border-2 border-amber-500 text-amber-400 hover:bg-amber-500/20 transition flex flex-col items-center justify-center mx-auto shadow-lg shadow-amber-500/10"
+                      className="w-24 h-24 rounded-full bg-[#FFF1F2] border-2 border-[#C8102E] text-[#C8102E] hover:bg-[#FFF1F2] transition flex flex-col items-center justify-center mx-auto shadow-lg shadow-sm"
                     >
                       <Mic className="w-8 h-8" />
                       <span className="text-[10px] font-bold uppercase mt-1">Start Speaking</span>
@@ -733,8 +665,8 @@ export default function CandidatePage() {
                 {/* Audio Level Waveform Meter */}
                 {speaking && (
                   <div className="max-w-md mx-auto space-y-2">
-                    <div className="text-xs text-amber-400 font-mono">Recording audio stream... ({audioLevel}%)</div>
-                    <div className="h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                    <div className="text-xs text-[#C8102E] font-mono">Recording audio stream... ({audioLevel}%)</div>
+                    <div className="h-2 bg-[#F8F8F8] rounded-full overflow-hidden border border-[#E5E5E5]">
                       <div className="h-full bg-amber-400 transition-all duration-75" style={{ width: `${audioLevel}%` }} />
                     </div>
                   </div>
@@ -747,11 +679,11 @@ export default function CandidatePage() {
               <motion.div
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-4"
+                className="bg-white border border-[#E5E5E5] rounded-2xl p-6 space-y-4"
               >
-                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                  <span className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-400" /> Evaluation Summary for Question #{answersHistory.length}
+                <div className="flex justify-between items-center border-b border-[#E5E5E5] pb-3">
+                  <span className="text-sm font-bold text-[#171717] flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[#C8102E]" /> Evaluation Summary for Question #{answersHistory.length}
                   </span>
                   <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
                     mode === "quiz"
@@ -769,34 +701,34 @@ export default function CandidatePage() {
                 {mode === "quiz" ? (
                   /* Quiz result layout */
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-center">
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <div className="text-xs text-slate-500">Your Answer</div>
+                    <div className="bg-[#F8F8F8] p-3 rounded-xl border border-[#E5E5E5]">
+                      <div className="text-xs text-[#555555]">Your Answer</div>
                       <div className={`text-lg font-bold mt-1 ${
                         lastAnalysis.correct ? "text-emerald-400" : "text-red-400"
                       }`}>{lastAnalysis.selected_option}) {lastAnalysis.selected_text}</div>
                     </div>
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <div className="text-xs text-slate-500">Correct Answer</div>
+                    <div className="bg-[#F8F8F8] p-3 rounded-xl border border-[#E5E5E5]">
+                      <div className="text-xs text-[#555555]">Correct Answer</div>
                       <div className="text-lg font-bold text-emerald-400 mt-1">{lastAnalysis.correct_answer}) {lastAnalysis.correct_answer_text}</div>
                     </div>
                   </div>
                 ) : (
                   /* Written / Oral result layout */
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <div className="text-xs text-slate-500">Overall Grade</div>
-                      <div className="text-lg font-bold text-amber-400 mt-1">{lastAnalysis.overall_score || 88}/100</div>
+                    <div className="bg-[#F8F8F8] p-3 rounded-xl border border-[#E5E5E5]">
+                      <div className="text-xs text-[#555555]">Overall Grade</div>
+                      <div className="text-lg font-bold text-[#C8102E] mt-1">{lastAnalysis.overall_score || 88}/100</div>
                     </div>
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <div className="text-xs text-slate-500">Authenticity Score</div>
-                      <div className="text-lg font-bold text-slate-200 mt-1">{lastAnalysis.authenticity_score}%</div>
+                    <div className="bg-[#F8F8F8] p-3 rounded-xl border border-[#E5E5E5]">
+                      <div className="text-xs text-[#555555]">Authenticity Score</div>
+                      <div className="text-lg font-bold text-[#171717] mt-1">{lastAnalysis.authenticity_score}%</div>
                     </div>
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <div className="text-xs text-slate-500">Word Count</div>
-                      <div className="text-lg font-bold text-slate-200 mt-1">{lastAnalysis.word_count} w</div>
+                    <div className="bg-[#F8F8F8] p-3 rounded-xl border border-[#E5E5E5]">
+                      <div className="text-xs text-[#555555]">Word Count</div>
+                      <div className="text-lg font-bold text-[#171717] mt-1">{lastAnalysis.word_count} w</div>
                     </div>
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <div className="text-xs text-slate-500">Paste Violations</div>
+                    <div className="bg-[#F8F8F8] p-3 rounded-xl border border-[#E5E5E5]">
+                      <div className="text-xs text-[#555555]">Paste Violations</div>
                       <div className={`text-lg font-bold mt-1 ${lastAnalysis.copy_paste_attempts > 0 ? "text-red-400" : "text-emerald-400"}`}>
                         {lastAnalysis.copy_paste_attempts || 0}
                       </div>
@@ -805,8 +737,8 @@ export default function CandidatePage() {
                 )}
 
                 {lastAnalysis.conceptual_feedback && (
-                  <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 text-xs leading-relaxed text-slate-300">
-                    <strong className="text-amber-400 block mb-1">
+                  <div className="bg-[#F8F8F8]/60 p-4 rounded-xl border border-[#E5E5E5] text-xs leading-relaxed text-[#555555]">
+                    <strong className="text-[#C8102E] block mb-1">
                       {mode === "quiz" ? "Explanation:" : "Conceptual Feedback:"}
                     </strong>
                     {lastAnalysis.conceptual_feedback}

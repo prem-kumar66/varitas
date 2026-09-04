@@ -1,0 +1,541 @@
+[
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p1_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 1,
+    "text": "NATURAL LANGUAGE PROCESSING",
+    "word_count": 3
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p2_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 2,
+    "text": "Unit-1 Regular Expressions and N-grams",
+    "word_count": 5
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p3_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 3,
+    "text": "Regular expression \uf0d8regular expression (often shortened to regex), a language for specifying text search strings. \uf0d8Formally, a regular expression is an algebraic notation for characterizing a set of strings. \uf0d8 Regular expressions are particularly useful for searching in texts, when we have a pattern to search corpus for and a corpus of texts to search through. \uf0d8 A regular expression search function will search through the corpus, returning all texts that match the pattern. The corpus can be a single document or a collection.",
+    "word_count": 84
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p4_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 4,
+    "text": "Basic Regular Expression Patterns \uf0d8The simplest kind of regular expression is a sequence of simple characters; putting characters in sequence is called concatenation. To search for woodchuck, we type /woodchuck/ \uf0d8Regular expressions are case sensitive; lower case /s/ is distinct from upper,simple regular expressions are below:",
+    "word_count": 46
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p5_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 5,
+    "text": "The use of the brackets [] to specify a disjunction of characters",
+    "word_count": 12
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p6_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 6,
+    "text": "\uf0d8The regular expression /[1234567890]/ specifies any single digit. While such classes of characters as digits or letters are important building blocks in expressions, they can get awkward (e.g., it\u2019s inconvenient to specify /[ABCDEFGHIJKLMNOPQRSTUVWXYZ]/ to mean \u201cany capital letter\u201d). In cases where there is a well-defined sequence associated with a set of characters, the brackets can be used with the dash (-) to specify any one character in a range. \uf0d8Ex:/[A-Z]/",
+    "word_count": 70
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p7_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 7,
+    "text": "\uf0d8The square braces can also be used to specify what a single character cannot be, by use of the caret \u02c6. \uf0d8For example, the pattern /*\u02c6a+/ matches any single character (including special characters) except a. This is only true when the caret is the first symbol after the open square brace. The caret \u02c6 for negation or just to mean \u02c6. See below re: the backslash for escaping the period",
+    "word_count": 70
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p8_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 8,
+    "text": "The question mark ? marks optionality of the previous expression",
+    "word_count": 10
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p9_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 9,
+    "text": "\uf0d8/a*/ means \u201cany string of zero or more as\u201d. This will match a or aaaaaa. \uf0d8Ex:baaaa \uf0d8/*ab+*/ means \u201czero or more a\u2019s or b\u2019s\u201d (not \u201czero or more right square braces\u201d). This will match strings like aaaa or ababab or bbbb. \uf0d8One very important special character is the period (/./), a wildcard expression that matches any single character (except a carriage return) The use of the period . to specify any character",
+    "word_count": 72
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p10_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 10,
+    "text": "Anchors in regular expressions",
+    "word_count": 4
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p11_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 11,
+    "text": "operator, also called the pipe symbol |. The pattern /cat|dog/ matches either the string cat or the string dog (Disjunction) The pattern /gupp(y|ies)/ would specify that we meant the disjunction only to apply to the suffixes y and ies(Precedence)",
+    "word_count": 39
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p12_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 12,
+    "text": "\uf0d8The following table gives the order operator precedence of RE operator precedence, from highest precedence to lowest precedence.",
+    "word_count": 18
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p13_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 13,
+    "text": "CORPORA(PLURAL OF CORPUS) Rough numbers of types and tokens for some English language corpora. The largest, the Google n-grams corpus, contains 13 million types, but this count only includes types appearing 40 or more times, so the true number would be much larger.",
+    "word_count": 43
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p14_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 14,
+    "text": "\uf0d8Text also reflects the demographic characteristics of the writer (or speaker): their age, gender, race, socioeconomic class can all influence the linguistic properties of the text we are processing.",
+    "word_count": 29
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p15_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 15,
+    "text": "\uf0d8How can a user of a dataset know all details? The best way is for the corpus creator to build a datasheet (Gebru et al., 2020) or data statement (Bender and Friedman, 2018) for each corpus. \uf0d8A datasheet specifies properties of a dataset like: \uf0d8Motivation: Why was the corpus collected, by whom, and who funded it? \uf0d8Situation: When and in what situation was the text written/spoken? For example, was there a task? Was the language originally spoken conversation, edited text, social media communication, monologue vs. dialogue? \uf0d8Language variety: What language (including dialect/region) was the corpus in? \uf0d8Speaker demographics: What was, e.g., the age or gender of the text\u2019s authors? \uf0d8Collection process: How big is the data? If it is a subsample how was it sampled? Was the data collected with consent? How was the data pre-processed, and what metadata is available? \uf0d8 Annotation process: What are the annotations, what are the demographics of the annotators, how were they trained, how was the data annotated? Distribution: Are there copyright or other intellectual property restrictions?",
+    "word_count": 173
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p16_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 16,
+    "text": "Text Normalization Before any natural language processing of a text, the text has to be normalized. At least three tasks are commonly applied as part of any normalization process: \uf0d81. Tokenizing (segmenting) words \uf0d82. Normalizing word formats \uf0d83. Segmenting sentences",
+    "word_count": 40
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p17_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 17,
+    "text": "\uf0d8Tokenization-Is the task of segmenting running text into words. \uf0d8A tokenizer can also be used to expand clitic contractions that are marked by apostrophes, for example, converting what\u2019re to the two tokens what are, and we\u2019re to we are.",
+    "word_count": 39
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p18_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 18,
+    "text": "One commonly used tokenization standard is known as the Penn Treebank tokenization standard, used for the parsed corpora (treebanks) released by the Lin- guistic Data Consortium (LDC), the source of many useful datasets. This standard separates out clitics (doesn\u2019t becomes does plus n\u2019t), keeps hyphenated words together, and separates out all punctuation (to save space we\u2019re showing visible spaces \u2018 \u2019 between tokens, although newlines is a more common output):",
+    "word_count": 70
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p19_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 19,
+    "text": "The standard method for tokenization is therefore to use deterministic algorithms based on regular expressions compiled into very efficient finite state automata. For example, Fig. 2.12 shows an example of a basic regular expression that can be used to tokenize English with the nltk.regexp tokenize function of the Python-based Natural Language Toolkit (NLTK)",
+    "word_count": 53
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p20_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 20,
+    "text": "\uf0d8In Chinese, hanzi for example, words are composed of characters (called hanzi in Chinese). Each character generally represents a single unit of meaning (called a morpheme) and is pronounceable as a single syllable. \uf0d8Ex: \uf0d8\u59da\u660e\u8fdb\u5165\u603b\u51b3\u8d5b \uf0d8\u201cYao Ming reaches the finals\u201d",
+    "word_count": 40
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p21_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 21,
+    "text": "\uf0d8In modern tokenization schemes, most tokens are words, but some tokens are frequently occurring morphemes or other subwords like - er. Every unseen word like lower can thus be represented by some sequence of known subword units, such as low and er, or even as a sequence of individual letters if necessary",
+    "word_count": 52
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p22_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 22,
+    "text": "Most tokenization schemes have two parts: a token learner, and a token segmenter. The token learner takes a raw training corpus (sometimes roughly pre separated into words, for example by whitespace) and induces a vocabulary, a set of tokens. The token segmenter takes a raw test sentence and segments it into the tokens in the vocabulary Three algorithms are widely used: byte-pair encoding , unigram language modeling and WordPiece ; there is also a Sentence Piece library that includes implementations of the first two of the three.",
+    "word_count": 87
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p23_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 23,
+    "text": "BPE \uf0d8The BPE token learner begins with a vocabulary that is just the set of all individual characters. It then examines the training corpus, chooses the two symbols that are most frequently adjacent (say \u2018A\u2019, \u2018B\u2019), adds a new merged symbol \u2018AB\u2019 to the vocabulary, and replaces every adjacent \u2019 A\u2019 \u2019B\u2019 in the corpus with the new \u2018AB\u2019. It continues to count and merge, creating new longer and longer character strings, until k merges have been done creating k novel tokens; k is thus a parameter of the algorithm. The resulting vocabulary consists of the original set of characters plus k new symbols.",
+    "word_count": 104
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p24_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 24,
+    "text": "\uf0d8The algorithm is usually run inside words (not merging across word boundaries), so the input corpus is first white-space-separated to give a set of strings, each corresponding to the characters of a word, plus a special end-of-word symbol , and its counts. Let\u2019s see its operation on the following tiny input corpus of 18 word tokens with counts for each word (the word low appears 5 times, the word newer 6 times, and so on), which would have a starting vocabulary of 11 letters:",
+    "word_count": 84
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p25_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 25,
+    "text": "The BPE algorithm first counts all pairs of adjacent symbols: the most frequent is the pair e r because it occurs in newer (frequency of 6) and wider (frequency of 3) for a total of 9 occurrences.1 We then merge these symbols, treating er as one symbol, and count again:",
+    "word_count": 50
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p27_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 27,
+    "text": "Algorithm of BPE",
+    "word_count": 3
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p28_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 28,
+    "text": "\uf0d8Word normalization is the task of putting words/tokens in a standard format, choosing a single normal form for words with multiple forms like USA and US. \uf0d8Case folding is another kind of normalization. Mapping everything to lower case means that Woodchuck and woodchuck are represented identically, which is very helpful for generalization in many tasks, such as information retrieval or speech recognition \uf0d8Lemmatization is the task of determining that two words have the same root, despite their surface differences. The words am, are, and is have the shared lemma be; the words dinner and dinners both have the lemma dinner.",
+    "word_count": 100
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p29_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 29,
+    "text": "\uf0d8Lemmatization algorithms can be complex. For this reason we sometimes make use of a simpler but cruder method, which mainly consists of chopping off word final affixes. \uf0d8This naive version of morphological analysis is called stemming. \uf0d8 For example, the Porter stemmer, a widely used stemming algorithm (Porter, 1980), \uf0d8when applied to the following paragraph: \uf0d8This was not the map we found in Billy Bones\u2019s chest, but an accurate copy, complete in all things-names and heights and soundings-with the single exception of the red crosses and the written notes. \uf0d8produces the following stemmed output: \uf0d8Thi wa not the map we found in Billi Bone s chest but an accur copi complet in all thing name and height and sound with the singl except of the red cross and the written note",
+    "word_count": 131
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p30_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 30,
+    "text": "Some extra stemming rules Sentence segmentation is another important step in text processing. The most use- ful cues for segmenting a text into sentences are punctuation, like periods, question marks, and exclamation points.",
+    "word_count": 33
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p31_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 31,
+    "text": "Minimum Edit Distance \uf0d8Much of natural language processing is concerned with measuring how similar two strings are. For example in spelling correction, the user typed some erroneous string\u2014let\u2019s say graffe\u2013and we want to know what the user meant. The user probably intended a word that is similar to graffie. Among candidate similar words, the word giraffe, which differs by only one letter from graffe, seems intuitively to be more similar than, say grail or graf, which differ in more letters.",
+    "word_count": 80
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p32_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 32,
+    "text": "\uf0d8Edit distance gives us a way to quantify both of these intuitions about string similarity. More formally, the minimum edit distance between two strings is defined as the minimum number of editing operations (operations like insertion, deletion, substitution) needed to transform one string into another. \uf0d8The gap between intention and execution, for example, is 5",
+    "word_count": 55
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p33_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 33,
+    "text": "\uf0d8Beneath the aligned strings is another representation; a series of symbols expressing an operation list for converting the top string into the bottom string: d for deletion, s for substitution, i for insertion.",
+    "word_count": 33
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p34_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 34,
+    "text": "We can also assign a particular cost or weight to each of these operations. The Levenshtein distance between two sequences is the simplest weighting factor in which each of the three operations has a cost of 1 Dynamic programming",
+    "word_count": 39
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p35_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 35,
+    "text": "\uf0d8The intuition of a dynamic programming problem is that a large problem can be solved by properly combining the solutions to various subproblems. Consider the shortest path of transformed words that represents the minimum edit distance between the strings intention and execution.",
+    "word_count": 42
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p36_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 36,
+    "text": "\uf0d8Let\u2019s first define the minimum edit distance between two strings. Given two strings, the source string X of length n, and target string Y of length m, we\u2019ll define D[i, j] as the edit distance between X[1..i] and Y[1.. j], i.e., the first i characters of X and the first j characters of Y. The edit distance between X and Y is thus D[n,m] \uf0d8The value of D[i, j] is computed by taking the minimum of the three possible paths through the matrix which arrive there:",
+    "word_count": 86
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p41_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 41,
+    "text": "N-gram Language Models \uf0d8Models that assign probabilities to sequences of words are called language models or LMs. \uf0d8We introduce the simplest model that assigns probabilities to sentences and sequences of words, the n-gram. \uf0d8An n-gram is a sequence n-gram of n words: a 2-gram (which we\u2019ll call bigram) is a two-word sequence of words like \u201cplease turn\u201d, \u201cturn your\u201d, or \u201dyour homework\u201d, and a 3-gram (a trigram) is a three-word sequence of words like \u201cplease turn your\u201d, or \u201cturn your homework\u201d \uf0d8n-gram models help to estimate the probability of the last word of an n-gram given the previous words.",
+    "word_count": 99
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p42_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 42,
+    "text": "\uf0d8P(w|h): \uf0d8The probability of a word w given some history h. \uf0d8Suppose the history h is \u201cits water is so transparent that\u201d and we want to know the probability that the next word is the: P(the|its water is so transparent that)",
+    "word_count": 41
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p43_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 43,
+    "text": "\uf0d8One way to estimate this probability is from relative frequency counts: \uf0d8 Take a very large corpus, count the number of times we see \u201cits water is so transparent that, and count the number of times this is followed by the\u201d. This would be answering the question \uf0d8\u201cOut of the times we saw the history h, how many times was it followed by the word w\u201d, as follows: \uf0d8 P(the|its water is so transparent that) = \uf0d8C(its water is so transparent that the) ______________________________ C(its water is so transparent that)",
+    "word_count": 90
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p44_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 44,
+    "text": "\uf0d8To represent the probability of a particular random variable \u201cXi\u201d taking on the value \u201cthe\u201d, or P(Xi = \u201cthe\u201d), and x1=w1,x2=w2\u2026.xn=wn \uf0d8we\u2019ll use P(w1,w2,...,wn). \uf0d8chain rule of probability: The chain rule shows the link between computing the joint probability of a sequence and computing the conditional probability of a word given previous words",
+    "word_count": 53
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p45_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 45,
+    "text": "\u2022 The intuition of the n-gram model is that instead of computing the probability of a word given its entire history, we can approximate the history by just the last few words. \u2022 The bigram model, for example, approximates the probability of a word given all the previous words P(wn|w1:n\u22121) by using only the conditional probability of the preceding word P(wn|wn\u22121). \u2022 In other words, instead of computing the probability \u2022 P(the|Walden Pond\u2019s water is so transparent that) \u2022 we approximate it with the probability P(the|that) \u2022 When we use a bigram model to predict the conditional probability of the next word, we are thus making the following approximation: \u2022 P(wn|w1:n\u22121) \u2248 P(wn|wn\u22121)",
+    "word_count": 113
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p46_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 46,
+    "text": "\uf0d8The assumption that the probability of a word depends only on the previous word is called a Markov assumption. \uf0d8Using Markov ,we can generalize the bigram (which looks one word into the past) n-gram to the trigram (which looks two words into the past) and thus to the n- gram (which looks n\u22121 words into the past). \uf0d8Let\u2019s see a general equation for this n-gram approximation to the conditional probability of the next word in a sequence. We\u2019ll use N here to mean the n-gram size, so N = 2 means bigrams and N = 3 means trigrams. Then we approximate the probability of a word given its entire context as follows:",
+    "word_count": 112
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p47_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 47,
+    "text": "\uf0d8For example, to compute a particular bigram probability of a word wn given a previous word wn\u22121, we\u2019ll compute the count of the bigram C(wn\u22121wn) and normalize by the sum of all the bigrams that share the same first word wn\u22121: We can simplify this equation, since the sum of all bigram counts that start with a given word wn\u22121 must be equal to the unigram count for that word wn-1.",
+    "word_count": 71
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p52_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 52,
+    "text": "Evaluating Language Models \uf0d8The best way to evaluate the performance of a language model is to embed it in an application and measure how much the application improves. Such end-to-end evaluation is called extrinsic evaluation. \uf0d8Running big NLP systems end-to-end is often very expensive. Instead, it would be nice to have a metric that can be used to quickly evaluate potential improvements in a language model. An intrinsic evaluation metric is one that measures the quality of a model independent of any application. \uf0d8For an intrinsic evaluation of a language model we need a test set. As with many of the statistical models in our field, the probabilities of an n-gram model come from the corpus it is trained on, the training set or training corpus. We can then measure the quality of an n-gram model by its performance on some unseen data called the test set or test corpus.",
+    "word_count": 150
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p53_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 53,
+    "text": "\uf0d8If we are given a corpus of text and want to compare two different n-gram models, we divide the data into training and test sets, train the parameters of both models on the training set, and then compare how well the two trained models fit(assigns a higher probability to the test set). \uf0d8In practice, we often just divide our data into 80% training, 10% development, and 10% test . \uf0d8The perplexity (sometimes called PPL for short) of a language model on a test set is the inverse probability of the test set, normalized by the number of words. For a test set W = w1w2 ...wN,:",
+    "word_count": 106
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p55_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 55,
+    "text": "Generalization and Zeros",
+    "word_count": 3
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p56_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 56,
+    "text": "Smoothing is done here \uf0d8If some words have zero probability, we can\u2019t compute perplexity at all, since we can\u2019t divide by 0! To keep a language model from assigning zero probability to these unseen events, we\u2019ll have to shave off a bit of probability mass from some more frequent events and give it to the events we\u2019ve never seen. This modification is called smoothing or discounting. \uf0d8A variety of ways to do smoothing: Laplace (add-one) smoothing, add-k smoothing, stupid backoff, and Kneser-Ney smoothing.",
+    "word_count": 83
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p57_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 57,
+    "text": "Laplace Smoothing \uf0d8The simplest way to do smoothing is to add one to all the n-gram counts, before we normalize them into probabilities. All the counts that used to be zero will now have a count of 1, the counts of 1 will be 2, and so on. This algorithm is called Laplace smoothing.",
+    "word_count": 54
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p60_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 60,
+    "text": "Discounting",
+    "word_count": 1
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p66_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 66,
+    "text": "Backoff and Interpolation",
+    "word_count": 3
+  },
+  {
+    "chunk_id": "UNIT-1 NLP.pdf_p67_c0",
+    "source": "UNIT-1 NLP.pdf",
+    "page": 67,
+    "text": "Completed unit-1",
+    "word_count": 2
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p1_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 1,
+    "text": "NATURAL LANGUAGE PROCESSING",
+    "word_count": 3
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p2_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 2,
+    "text": "UNIT-2 \uf0d8LEXICAL SEMANTICS",
+    "word_count": 3
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p3_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 3,
+    "text": "linguistic study of word meaning is called lexical semantics \uf0d8sing is the lemma for sing, sang, sung. \uf0d8In many languages the infinitive form is used as the lemma for the verb, so Spanish dormir \u201cto sleep\u201d is the lemma for duermes \u201cyou sleep\u201d. The specific forms sung or carpets or sing or duermes are called wordforms. \uf0d8As the example above shows, each lemma can have multiple meanings; the lemma mouse can refer to the rodent or the cursor control device. We call each of these aspects of the meaning of mouse a word sense.",
+    "word_count": 94
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p4_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 4,
+    "text": "\uf0d8Synonymy One important component of word meaning is the relationship between word senses. \uf0d8 For example when one word has a sense whose meaning is identical to a sense of another word, or nearly identical, we say the two senses of those two words are synonyms. \uf0d8Synonyms include such pairs as \uf0d8 couch/sofa vomit/throw up filbert/hazelnut car/automobile \uf0d8propositional meaning- two words have the same meaning which doesn\u2019t change the truth of sentence.",
+    "word_count": 72
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p5_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 5,
+    "text": "Word similarity Word Relatedness The meaning of two words can be related in ways other than similarity. Ex:coffee and cup are clearly related",
+    "word_count": 23
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p6_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 6,
+    "text": "\uf0d8A semantic field is a set of words which cover a particular semantic domain and bear structured relations with each other. For example, words might be related by being in the semantic field of hospitals (surgeon, scalpel, nurse, anesthetic, hospital), restaurants (waiter, menu, plate, food, chef)",
+    "word_count": 46
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p7_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 7,
+    "text": "words have affective meanings or connotations- Positive connotations \u2013happy, negative connotations-sad Positive or negative evaluation language is called sentiment",
+    "word_count": 19
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p8_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 8,
+    "text": "3 dimensions of a word in vector.",
+    "word_count": 7
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p9_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 9,
+    "text": "Vector Semantics \uf0d8Vector semantics is the standard way to represent word meaning in NLP , helping us model many of the aspects of word meaning we saw in the previous section. \uf0d8The idea of vector semantics is to represent a word as a point in a multidimensional semantic space that is derived from the distributions of word neighbors. Vectors for representing words are called embeddings .",
+    "word_count": 66
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p11_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 11,
+    "text": "Words and Vectors \uf0d8In a term-document matrix, each row represents a word in the vocabulary and each column represents a document from some collection of documents.",
+    "word_count": 26
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p12_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 12,
+    "text": "\uf0d8A vector space is a collection of vectors, characterized by their dimension. In the example in Fig. 6.3, the document vectors are of dimension 4, just so they fit on the page; in real term-document matrices, the vectors representing each document would have dimensionality |V|, the vocabulary size.",
+    "word_count": 48
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p15_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 15,
+    "text": "Words as vectors: document dimensions \uf0d8vector semantics can also be used to represent the meaning of words, by associating each word with a word vector. \uf0d8a row vector rather than a column vector, hence with different dimensions, as shown in Fig. 6.5. The four dimensions of the vector for fool, [36,58,1,4], correspond to the four Shakespeare plays. Word counts in the same four dimensions are used to form the vectors for the other 3 words: wit, [20,15,2,3]; battle, [1,0,7,13]; and good [114,80,62,89].",
+    "word_count": 82
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p17_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 17,
+    "text": "\uf0d8An alternative to using the term-document matrix to represent words as vectors of document counts, is to use the term-term matrix, also called the word-word matrix or the term-context matrix. \uf0d8This matrix is thus of dimensionality |V|\u00d7|V| and each cell records the number of times the row (target) word and the column (context) word co- occur in some context in some training corpus. \uf0d8The context could be the document, in which case the cell represents the number of times the two words appear in the same document. It is most common, however, to use smaller contexts. \uf0d8for example of 4 words to the left and 4 words to the right, in which case the cell represents the number of times (in some training corpus) the column word occurs in such a \u00b14 word window around the row word.",
+    "word_count": 138
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p19_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 19,
+    "text": "\uf0d8If we then take every occurrence of each word (say strawberry) and count the context words around it, we get a word-word co- occurrence matrix.",
+    "word_count": 25
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p21_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 21,
+    "text": "Cosine for measuring similarity \uf0d8To measure similarity between two target words v and w,the most common similarity metric is the cosine of the angle between the vectors.",
+    "word_count": 27
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p22_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 22,
+    "text": "\uf0d8The vector length is defined as \uf0d8 The dot product is higher if a vector is longer, with higher values in each dimension",
+    "word_count": 23
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p23_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 23,
+    "text": "\uf0d8Dot product must be normalized to reduce length of document,the cosine similarity metric between two vectors v and w after normalizing can be computed as:",
+    "word_count": 25
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p26_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 26,
+    "text": "TF-IDF: Weighing terms in the vector \uf0d8In the tf-idf weighting (the \u2018-\u2019 here is a hyphen, not a minus sign) is the product of two terms, each term capturing one of these two intuitions. \uf0d8Tf is term frequency and is the frequency of the word t in the document d.",
+    "word_count": 50
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p27_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 27,
+    "text": "\uf0d8The document frequency, dft of a term t is the number of documents it occurs in. Document frequency is not the same as the collection frequency of a term, which is the total number of times the word appears in the whole collection in any document. The idf is defined using the fraction N/dft , where N is the total number of documents in the collection, and dft is the number of documents in which term t occurs, The resulting definition for inverse document frequency (idf) is thus The tf-idf weighted value wt,d for word t in document d",
+    "word_count": 99
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p29_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 29,
+    "text": "Pointwise Mutual Information (PMI)",
+    "word_count": 4
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p30_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 30,
+    "text": "\uf0d8The numerator tells us how often we observed the two words together (assuming we compute probability by using the MLE). The denominator tells us how often we would expect the two words to co-occur assuming they each occurred independently; recall that the probability of two independent events both occurring is just the product of the probabilities of the two events. Thus, the ratio gives us an estimate of how much more the two words co-occur than we expect by chance. PMI is a useful tool whenever we need to find words that are strongly associated",
+    "word_count": 95
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p31_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 31,
+    "text": "\uf0d8PMI values range from negative to positive infinity. For this reason it is more common to use Positive PMI (called PPMI) which replaces all negative PMI values with zero.",
+    "word_count": 29
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p35_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 35,
+    "text": "Visualizing Embeddings",
+    "word_count": 2
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p36_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 36,
+    "text": "Semantic properties of embeddings",
+    "word_count": 4
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p41_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 41,
+    "text": "Embeddings and Historical Semantics \uf0d8Embeddings can also be a useful tool for studying how meaning changes over time.",
+    "word_count": 18
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p42_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 42,
+    "text": "Bias and Embeddings",
+    "word_count": 3
+  },
+  {
+    "chunk_id": "NLP-UNIT 2.pdf_p43_c0",
+    "source": "NLP-UNIT 2.pdf",
+    "page": 43,
+    "text": "\uf0d8representational harm-which is a harm caused by a system demeaning or even ignoring some social groups. \uf0d8debiasing may reduce bias in embeddings and don\u2019t eliminate.",
+    "word_count": 25
+  }
+]

@@ -20,7 +20,8 @@ groq_client = None
 if GROQ_API_KEY:
     try:
         from groq import Groq
-        groq_client = Groq(api_key=GROQ_API_KEY)
+        import httpx
+        groq_client = Groq(api_key=GROQ_API_KEY, http_client=httpx.Client())
     except Exception as e:
         print(f"[RAG Evaluator] Warning: Groq init error: {e}")
 
@@ -122,7 +123,7 @@ Return ONLY JSON, with no markdown fences or other text.
 
     try:
         completion = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="qwen/qwen3.8-27b",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=800,

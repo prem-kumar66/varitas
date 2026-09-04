@@ -23,7 +23,8 @@ groq_client = None
 if GROQ_API_KEY:
     try:
         from groq import Groq
-        groq_client = Groq(api_key=GROQ_API_KEY)
+        import httpx
+        groq_client = Groq(api_key=GROQ_API_KEY, http_client=httpx.Client())
     except Exception as e:
         print(f"Warning: Could not initialize Groq client for validator: {e}")
 
@@ -61,7 +62,7 @@ Return ONLY JSON without markdown formatting.
 
     try:
         completion = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="qwen/qwen3.8-27b",
             messages=[
                 {"role": "system", "content": "You are a precise academic answer key evaluator. Return JSON only."},
                 {"role": "user", "content": prompt},
