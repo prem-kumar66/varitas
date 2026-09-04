@@ -63,7 +63,7 @@ class AssessmentGenerator:
         if self.client:
             # Use Groq LLM for high-quality generation
             try:
-                return self._llm_generate(prompt, mode, num_questions, difficulty, rag_context)
+                return self._llm_generate(prompt, mode, num_questions, difficulty, rag_context, context_chunks)
             except Exception as e:
                 print(f"[Generator] LLM generation failed: {e}. Falling back to local extraction.")
                 return self._local_extract(mode, num_questions, context_chunks)
@@ -72,28 +72,44 @@ class AssessmentGenerator:
             print("[Generator] No LLM available -- extracting questions from RAG chunks directly.")
             return self._local_extract(mode, num_questions, context_chunks)
 
-    def _llm_generate(self, prompt: str, mode: str, num_questions: int, difficulty: str, rag_context: str) -> List[Dict]:
-        """Uses Groq LLM to generate questions from actual RAG context."""
-        # Pre-compute conditionals (no backslashes inside f-strings in Python 3.10)
-        mode_label = "For 'oral' or 'written' mode" if mode != "quiz" else "For 'quiz' mode"
+    def _llm_generate(
+        self,
+        prompt: str,
+        mode: str,
+        num_questions: int,
+        difficulty: str,
+        rag_context: str,
+        context_chunks: Optional[List[Dict]] = None,
+    ) -> List[Dict]:
+        """Uses Groq LLM to generate questions strictly derived from actual RAG PDF context."""
+        # Identify source file names
+        source_names = list(set([os.path.basename(c.get("source", "")) for c in (context_chunks or []) if c.get("source")]))
+        source_label = ", ".join(source_names) if source_names else "Uploaded PDF"
+
+        # Pre-compute conditionals
+        mode_label = "For 'oral' (viva) or 'written' (text) mode" if mode != "quiz" else "For 'quiz' (MCQ) mode"
         if mode != "quiz":
-            format_example = '[{"question": "...", "reference_answer": "...", "rubric_keywords": ["kw1", "kw2"]}]'
+            format_example = '[{"question": "...", "reference_answer": "...", "rubric_keywords": ["kw1", "kw2"], "source": "' + source_label + '"}]'
         else:
-            format_example = '[{"question": "...", "options": {"A": "...", "B": "...", "C": "...", "D": "..."}, "correct_answer": "A", "explanation": "..."}]'
+            format_example = '[{"question": "...", "options": {"A": "...", "B": "...", "C": "...", "D": "..."}, "correct_answer": "A", "explanation": "...", "source": "' + source_label + '"}]'
 
         system_prompt = f"""You are an expert academic evaluator creating exam questions.
+STRICT REQUIREMENT: All questions (MCQ quizzes, oral viva, written/text assessments), options, and reference answers MUST BE EXCLUSIVELY and SOLELY derived from the provided PDF Context below.
+- Do NOT introduce external concepts, outside topics, or questions not covered in the text.
+- Do NOT use generic training knowledge or standard textbook questions unless explicitly mentioned in the text.
+- Every question must be fully answerable purely from the provided text.
+- For each question, include the "source" field indicating the source document name: "{source_label}".
+
 Generate exactly {num_questions} questions of '{difficulty}' difficulty for a '{mode}' exam.
-IMPORTANT: Both Questions AND Reference Answers MUST be strictly derived from the provided Syllabus Context below.
-Do NOT invent topics, and do NOT use generic AI knowledge or mock data. Every reference answer must be based entirely on the provided text.
 
 {mode_label}, return a raw JSON array:
 {format_example}
 
 ONLY return valid JSON. No markdown, no backticks, no extra text before or after the JSON array."""
 
-        user_prompt = f"""Syllabus Context (from the uploaded PDF):
+        user_prompt = f"""Syllabus Context (from the uploaded PDF '{source_label}'):
 ---
-{rag_context[:6000]}
+{rag_context[:7000]}
 ---
 
 Teacher's Request: {prompt}
@@ -128,7 +144,7 @@ Generate {num_questions} {mode} questions and detailed reference answers based O
         if not isinstance(questions, list) or len(questions) == 0:
             raise ValueError("LLM returned empty or invalid question list.")
 
-        # Validate each question has required fields
+        # Validate each question has required fields and source metadata
         validated = []
         for q in questions:
             if not q.get("question"):
@@ -141,6 +157,8 @@ Generate {num_questions} {mode} questions and detailed reference answers based O
                     q["reference_answer"] = "Refer to the course material for a detailed answer."
                 if not q.get("rubric_keywords"):
                     q["rubric_keywords"] = []
+            if not q.get("source"):
+                q["source"] = source_label
             validated.append(q)
 
         if not validated:
@@ -200,6 +218,7 @@ Generate {num_questions} {mode} questions and detailed reference answers based O
                     q = self._make_open_question(sentence, context_window, is_definition, is_process)
 
                 if q:
+                    q["source"] = os.path.basename(chunk.get("source", "Uploaded PDF"))
                     questions.append(q)
 
         if not questions:
