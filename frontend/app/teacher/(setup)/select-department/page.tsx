@@ -1,59 +1,78 @@
 "use client";
+import { useEffect } from "react";
 import { useTeacherContext } from "@/components/teacher/TeacherProvider";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { ArrowRight, Laptop, BrainCircuit, Database, Cpu, Zap, Settings, Building2 } from "lucide-react";
+import { ArrowRight, Laptop, BrainCircuit, Database, Cpu, Zap, Settings, Building2, Network, Cog, ShieldAlert } from "lucide-react";
 
 export default function SelectDepartmentPage() {
-  const { setDepartment } = useTeacherContext();
+  const { setDepartment, assignedDepartment, isGuest } = useTeacherContext();
   const router = useRouter();
 
+  // If regular faculty already has an assigned department, lock and forward directly to year selection
+  useEffect(() => {
+    if (!isGuest && assignedDepartment) {
+      setDepartment(assignedDepartment);
+      router.replace("/teacher/select-year");
+    }
+  }, [assignedDepartment, isGuest, router, setDepartment]);
+
+  // Strictly 10 Allowed Departments: ai, aiml, it, cse, ece, eee, civil, mech, data science, ecm
   const departments = [
-    { name: "Computer Science & Engineering", code: "CSE", icon: Laptop },
-    { name: "Artificial Intelligence & Machine Learning", code: "AI & ML", icon: BrainCircuit },
-    { name: "Computer Science & Data Science", code: "CSE-DS", icon: Database },
-    { name: "Electronics & Communication Engineering", code: "ECE", icon: Cpu },
-    { name: "Electrical & Electronics Engineering", code: "EEE", icon: Zap },
-    { name: "Mechanical Engineering", code: "ME", icon: Settings },
-    { name: "Civil Engineering", code: "CE", icon: Building2 },
+    { name: "Computer Science & Engineering", code: "cse", display: "CSE", icon: Laptop },
+    { name: "Artificial Intelligence", code: "ai", display: "AI", icon: BrainCircuit },
+    { name: "AI & Machine Learning", code: "aiml", display: "AIML", icon: Network },
+    { name: "Data Science", code: "data science", display: "Data Science", icon: Database },
+    { name: "Information Technology", code: "it", display: "IT", icon: Laptop },
+    { name: "Electronics & Communication", code: "ece", display: "ECE", icon: Cpu },
+    { name: "Electrical & Electronics", code: "eee", display: "EEE", icon: Zap },
+    { name: "Mechanical Engineering", code: "mech", display: "MECH", icon: Cog },
+    { name: "Civil Engineering", code: "civil", display: "CIVIL", icon: Building2 },
+    { name: "Electronics & Computer Eng.", code: "ecm", display: "ECM", icon: Cpu },
   ];
 
-  const handleSelect = (dept: string) => {
-    setDepartment(dept);
+  const handleSelect = (deptCode: string) => {
+    setDepartment(deptCode);
     router.push("/teacher/select-year");
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F8F8] flex flex-col py-16 px-6">
-      <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col">
-        <header className="mb-12 text-center">
-          <p className="text-[#C8102E] font-bold tracking-widest uppercase text-xs mb-2">Veritas Academic • Teacher Portal</p>
-          <h1 className="text-4xl font-extrabold text-[#171717]">Select Your Department</h1>
-          <p className="text-[#555555] mt-2">Choose the department you want to manage.</p>
-        </header>
+    <div className="space-y-8 max-w-5xl mx-auto py-4">
+      <div className="text-center space-y-2">
+        {isGuest && (
+          <div className="inline-flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-1 rounded-full font-semibold mb-2">
+            <ShieldAlert className="w-4 h-4 text-amber-600" /> Guest Mode: Choose an exploratory department
+          </div>
+        )}
+        <h1 className="text-3xl font-extrabold text-[#171717]">Select Department</h1>
+        <p className="text-sm text-[#555555]">
+          Select the engineering department you wish to monitor.
+        </p>
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {departments.map((dept, index) => (
-            <motion.button
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {departments.map((dept, idx) => {
+          const Icon = dept.icon;
+          return (
+            <motion.div
               key={dept.code}
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
+              transition={{ delay: idx * 0.04 }}
               onClick={() => handleSelect(dept.code)}
-              className="bg-white border border-[#E5E5E5] p-6 rounded-2xl hover:border-[#C8102E] hover:shadow-lg transition-all text-left group relative"
+              className="bg-white border border-[#E5E5E5] hover:border-[#C8102E] p-6 rounded-3xl cursor-pointer hover:shadow-lg transition-all group relative overflow-hidden"
             >
-              <div className="w-12 h-12 bg-[#FFF1F2] rounded-xl flex items-center justify-center mb-4 text-[#C8102E] group-hover:scale-110 transition-transform">
-                <dept.icon className="w-6 h-6" />
+              <div className="w-12 h-12 rounded-2xl bg-[#FFF1F2] text-[#C8102E] flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+                <Icon className="w-6 h-6" />
               </div>
-              <h3 className="font-bold text-[#171717] leading-tight mb-1">{dept.name}</h3>
-              <p className="text-xs font-semibold text-[#555555] group-hover:text-[#C8102E] transition-colors">{dept.code}</p>
-              
-              <div className="absolute right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <ArrowRight className="w-5 h-5 text-[#C8102E]" />
+              <span className="text-xs font-bold text-[#C8102E] tracking-wider uppercase">{dept.display}</span>
+              <h3 className="text-lg font-bold text-[#171717] mt-1 group-hover:text-[#C8102E] transition-colors">{dept.name}</h3>
+              <div className="mt-4 flex items-center gap-1 text-xs font-semibold text-[#555555] group-hover:text-[#171717] transition-colors">
+                Select Domain <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform text-[#C8102E]" />
               </div>
-            </motion.button>
-          ))}
-        </div>
+            </motion.div>
+          );
+        })}
       </div>
     </div>
   );

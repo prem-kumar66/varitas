@@ -225,6 +225,88 @@ class RAGVectorStore:
             })
         return results
 
+    def _ensure_subject_loaded(self, subject_key: str):
+        """Ensures subject metadata is loaded from disk if not yet in cache."""
+        clean = subject_key.lower().replace(" ", "_")
+        if clean not in self._indices:
+            meta_file = os.path.join(self.base_dir, clean, "chunks.json")
+            if os.path.exists(meta_file):
+                try:
+                    with open(meta_file, "r", encoding="utf-8") as f:
+                        chunks = json.load(f)
+                    self._indices[clean] = {"chunks": chunks}
+                except Exception:
+                    pass
+
+    def has_document(self, filename: str, subject_key: Optional[str] = None) -> bool:
+        """Checks if a document with this filename is already indexed in the given subject (or globally)."""
+        target_name = os.path.basename(filename).strip().lower()
+        subjs_to_check = []
+        if subject_key:
+            self._ensure_subject_loaded(subject_key)
+            clean = subject_key.lower().replace(" ", "_")
+            if clean in self._indices:
+                subjs_to_check.append(clean)
+        if not subjs_to_check:
+            subjs_to_check = list(self._indices.keys())
+
+        for subj in subjs_to_check:
+            data = self._indices.get(subj)
+            if not data:
+                continue
+            for c in data.get("chunks", []):
+                src = os.path.basename(c.get("source", "")).strip().lower()
+                if src == target_name:
+                    return True
+        return False
+
+    def get_document_chunks(self, filename: str, subject_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Returns all chunks belonging to a specific filename."""
+        target_name = os.path.basename(filename).strip().lower()
+        subjs_to_check = []
+        if subject_key:
+            self._ensure_subject_loaded(subject_key)
+            clean = subject_key.lower().replace(" ", "_")
+            if clean in self._indices:
+                subjs_to_check.append(clean)
+        if not subjs_to_check:
+            subjs_to_check = list(self._indices.keys())
+
+        matched = []
+        for subj in subjs_to_check:
+            data = self._indices.get(subj)
+            if not data:
+                continue
+            for c in data.get("chunks", []):
+                src = os.path.basename(c.get("source", "")).strip().lower()
+                if src == target_name:
+                    chunk_copy = dict(c)
+                    chunk_copy["subject"] = subj
+                    matched.append(chunk_copy)
+        return matched
+
+    def get_subject_chunks(self, subject_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Returns all chunks for a given subject (or all indexed chunks if None)."""
+        subjs_to_check = []
+        if subject_key:
+            self._ensure_subject_loaded(subject_key)
+            clean = subject_key.lower().replace(" ", "_")
+            if clean in self._indices:
+                subjs_to_check.append(clean)
+        if not subjs_to_check:
+            subjs_to_check = list(self._indices.keys())
+
+        all_chunks = []
+        for subj in subjs_to_check:
+            data = self._indices.get(subj)
+            if not data:
+                continue
+            for c in data.get("chunks", []):
+                chunk_copy = dict(c)
+                chunk_copy["subject"] = subj
+                all_chunks.append(chunk_copy)
+        return all_chunks
+
     def clear_index(self, subject_key: str):
         """Clears index in memory and on disk for a given subject."""
         subj_clean = subject_key.lower().replace(" ", "_")

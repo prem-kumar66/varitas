@@ -1,7 +1,8 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { useTeacherContext } from "@/components/teacher/TeacherProvider";
-import { Bot, Send, User, Sparkles, BarChart2, TrendingDown, HelpCircle, UserCheck, Save, Trash2, Edit3, X } from "lucide-react";
+import { Bot, Send, User, Sparkles, BarChart2, TrendingDown, HelpCircle, UserCheck, Save, Trash2, Edit3, X, FileText, CheckCircle2, AlertCircle } from "lucide-react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 
 const BACKEND_HTTP = process.env.NEXT_PUBLIC_BACKEND_HTTP || "http://localhost:8000";
@@ -25,17 +26,50 @@ export default function TeacherAIPage() {
   const [assessmentName, setAssessmentName] = useState("New Assessment");
   const [publishing, setPublishing] = useState(false);
   const [publishedId, setPublishedId] = useState<string | null>(null);
+  const [availableDocs, setAvailableDocs] = useState<string[]>([]);
+  const [selectedDoc, setSelectedDoc] = useState<string>("all");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load indexed subject documents for strict PDF grounding
+  useEffect(() => {
+    const fetchDocs = async () => {
+      try {
+        const subjectKey = (department && year) ? `${department}_${year}`.replace(/\s+/g, "_").toLowerCase() : "global";
+        const res = await fetch(`${BACKEND_HTTP}/api/rag/documents?subject_key=${subjectKey}`);
+        if (res.ok) {
+          const data = await res.json();
+          const docList: string[] = [];
+          data.sources?.forEach((s: any) => {
+            s.documents?.forEach((d: any) => {
+              if (d.filename && !docList.includes(d.filename)) docList.push(d.filename);
+            });
+          });
+          setAvailableDocs(docList);
+          
+          if (typeof window !== "undefined") {
+            const params = new URLSearchParams(window.location.search);
+            const docParam = params.get("doc");
+            if (docParam && docList.includes(docParam)) {
+              setSelectedDoc(docParam);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load subject documents", e);
+      }
+    };
+    fetchDocs();
+  }, [department, year]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, generatedAssessment]);
 
   const quickActions = [
-    { title: "Generate Quiz", prompt: "Generate a quiz from the uploaded PDF", icon: HelpCircle },
-    { title: "Generate Viva", prompt: "Generate 5 viva questions on NLP Unit 2", icon: UserCheck },
-    { title: "Analyze Class", prompt: "Analyze my overall class performance.", icon: BarChart2 },
+    { title: "Generate MCQ Quiz", prompt: "Generate a 5-question MCQ quiz from the uploaded PDF", icon: HelpCircle },
+    { title: "Generate Oral Viva", prompt: "Generate 5 oral viva questions from the uploaded PDF", icon: UserCheck },
+    { title: "Generate Written Test", prompt: "Generate 3 written questions with reference answers from the uploaded PDF", icon: FileText },
     { title: "Find Weak Topics", prompt: "Which topics are weakest in my class?", icon: TrendingDown },
   ];
 
@@ -59,16 +93,21 @@ export default function TeacherAIPage() {
         const numMatch = text.match(/\b(\d+)\b/);
         const numQ = numMatch ? parseInt(numMatch[1]) : 5;
 
+        const payload: any = { 
+          prompt: text, 
+          subject_key: subjectKey,
+          mode: inferredMode,
+          num_questions: Math.min(numQ, 15),
+          difficulty: "medium"
+        };
+        if (selectedDoc && selectedDoc !== "all") {
+          payload.source_filename = selectedDoc;
+        }
+
         const res = await fetch(`${BACKEND_HTTP}/api/assessments/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            prompt: text, 
-            subject_key: subjectKey,
-            mode: inferredMode,
-            num_questions: Math.min(numQ, 15),
-            difficulty: "medium"
-          }),
+          body: JSON.stringify(payload),
         });
         
         if (!res.ok) {
@@ -82,10 +121,8 @@ export default function TeacherAIPage() {
         const data = await res.json();
         if (data.questions && data.questions.length > 0) {
           setGeneratedAssessment(data.questions);
-          const sourceNote = data.questions[0]?.question?.includes("Mock") 
-            ? "\n\n⚠️ Warning: These appear to be generated without PDF context."
-            : `\n\n✅ Generated ${data.questions.length} question(s) from your uploaded documents.`;
-          setMessages(prev => [...prev, { role: "ai", content: `I've generated the assessment based on the RAG context. Please review the questions below.${sourceNote}` }]);
+          const sourceList = data.source_documents?.length ? data.source_documents.join(", ") : selectedDoc !== "all" ? selectedDoc : "uploaded subject PDF";
+          setMessages(prev => [...prev, { role: "ai", content: `I have generated ${data.questions.length} questions strictly grounded in: 📄 **${sourceList}**.\n\nPlease review the questions below before publishing.` }]);
         } else {
           setMessages(prev => [...prev, { role: "ai", content: "⚠️ No relevant content found in the uploaded documents. Please upload a PDF first in the Syllabus & RAG section, then try again." }]);
         }
@@ -149,12 +186,48 @@ export default function TeacherAIPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
-      <header className="mb-6">
-        <h1 className="text-3xl font-extrabold text-[#171717] flex items-center gap-3">
-          <Bot className="w-8 h-8 text-[#C8102E]" /> Teacher AI
-        </h1>
-        <p className="text-[#555555] mt-1">Your intelligent academic teaching assistant.</p>
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold text-[#171717] flex items-center gap-3">
+            <Bot className="w-8 h-8 text-[#C8102E]" /> Teacher AI
+          </h1>
+          <p className="text-[#555555] mt-1">Your intelligent academic teaching assistant.</p>
+        </div>
       </header>
+
+      {/* Grounding Source Selector */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-[#E5E5E5] px-4 py-3 rounded-2xl mb-4 text-xs shadow-sm">
+        <div className="flex items-center gap-2.5">
+          <span className="font-bold text-[#171717] flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            PDF Grounding Source:
+          </span>
+          <select 
+            value={selectedDoc}
+            onChange={(e) => setSelectedDoc(e.target.value)}
+            className="bg-[#F8F8F8] border border-[#E5E5E5] rounded-lg px-3 py-1.5 text-xs font-semibold text-[#171717] focus:outline-none focus:border-[#C8102E]"
+          >
+            <option value="all">All Uploaded Subject PDFs ({availableDocs.length})</option>
+            {availableDocs.map((doc, idx) => (
+              <option key={idx} value={doc}>{doc}</option>
+            ))}
+          </select>
+        </div>
+        {availableDocs.length === 0 ? (
+          <div className="flex items-center gap-2 text-amber-700 font-medium">
+            <AlertCircle className="w-4 h-4 text-amber-500" />
+            <span>No PDFs uploaded yet for this subject.</span>
+            <Link href="/teacher/knowledge" className="underline font-bold text-[#C8102E]">
+              Upload PDF
+            </Link>
+          </div>
+        ) : (
+          <span className="text-emerald-700 font-semibold flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            Questions strictly asked from uploaded PDF only
+          </span>
+        )}
+      </div>
 
       {/* Quick Actions */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -246,7 +319,14 @@ export default function TeacherAIPage() {
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
-                    <p className="font-semibold text-sm pr-6">{idx + 1}. {q.question}</p>
+                    <div className="pr-6">
+                      <p className="font-semibold text-sm">{idx + 1}. {q.question}</p>
+                      {q.source && (
+                        <span className="inline-block mt-1 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded">
+                          📄 Source: {q.source}
+                        </span>
+                      )}
+                    </div>
                     
                     {assessmentMode === "quiz" && q.options && (
                       <div className="mt-2 text-xs text-gray-600 grid grid-cols-2 gap-2">

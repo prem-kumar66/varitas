@@ -12,7 +12,8 @@ import {
   BarChart3, 
   Settings,
   LogOut,
-  GraduationCap
+  GraduationCap,
+  ShieldCheck
 } from "lucide-react";
 
 export function TeacherSidebar() {
@@ -26,6 +27,13 @@ export function TeacherSidebar() {
     router.push("/login/teacher");
   };
 
+  const isAdmin = typeof window !== "undefined" && (() => {
+    try {
+      const a = JSON.parse(localStorage.getItem("veritas_teacher_auth") || "{}");
+      return a.is_admin || a.email?.toLowerCase() === "admin@anurag.edu.in";
+    } catch (e) { return false; }
+  })();
+
   const navItems = [
     { name: "Dashboard", href: "/teacher/dashboard", icon: LayoutDashboard },
     { name: "Students", href: "/teacher/students", icon: Users },
@@ -34,7 +42,9 @@ export function TeacherSidebar() {
     { name: "Question Bank", href: "/teacher/questions", icon: Database },
     { name: "Syllabus & RAG", href: "/teacher/knowledge", icon: Library },
     { name: "Analytics", href: "/teacher/analytics", icon: BarChart3 },
+    { name: "Domain Queries", href: "/teacher/queries", icon: ClipboardList },
     { name: "Settings", href: "/teacher/settings", icon: Settings },
+    ...(isAdmin ? [{ name: "Admin Panel", href: "/teacher/admin", icon: ShieldCheck }] : []),
   ];
 
   return (

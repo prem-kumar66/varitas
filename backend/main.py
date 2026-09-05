@@ -36,6 +36,27 @@ from analyzer import CognitiveAnalyzer, AnswerSegment, Baseline
 from follow_up import FollowUpGenerator
 from validator import validate_answer
 import db
+from db import (
+    ALLOWED_DEPARTMENTS,
+    COLLEGE_EMAIL_SUFFIX,
+    is_valid_college_email,
+    normalize_department,
+    db_register_faculty,
+    db_authenticate_faculty,
+    db_submit_faculty_query,
+    db_list_faculty_queries,
+    db_update_faculty_query,
+    db_create_or_update_assignment,
+    db_get_student_assignment,
+    db_list_department_assignments,
+    db_delete_assignment,
+    db_get_department_subjects,
+    db_request_subject_validation,
+    db_approve_subject_questions,
+    db_get_faculty_validation_tasks,
+    db_get_student_notifications,
+    db_update_faculty_passcode,
+)
 import report
 import demo_mode
 import templates as templates_mod
@@ -142,6 +163,8 @@ def get_session(sid: str, language: str = "en") -> InterviewSession:
 class SessionStart(BaseModel):
     session_id: str
     candidate_name: str = ""
+    candidate_email: Optional[str] = ""
+    department: Optional[str] = ""
     roll_number: str = ""
     mobile_number: str = ""
     academic_year: str = ""
@@ -211,6 +234,7 @@ class AssessmentGeneratePayload(BaseModel):
     mode: str
     num_questions: int = 5
     difficulty: str = "medium"
+    source_filename: Optional[str] = None
 
 class AssessmentPublishPayload(BaseModel):
     exam_id: str
@@ -228,7 +252,10 @@ class AssessmentPublishPayload(BaseModel):
 
 # ---------- Academic Question Bank APIs ----------
 @app.get("/api/academic/subjects")
-async def get_academic_subjects():
+async def get_academic_subjects(department: Optional[str] = None):
+    if department:
+        subjects = await db_get_department_subjects(department)
+        return {"subjects": subjects}
     subjects = await db.db_list_subjects()
     if not subjects:
         return {"subjects": templates_mod.list_templates()}
@@ -345,10 +372,17 @@ async def session_start(body: SessionStart):
     sess.language = body.language
     sess.subject_key = body.subject_key or None
     sess.analyzer = CognitiveAnalyzer(language=body.language)
+    # Enforce @anurag.edu.in for students
+    clean_email = (body.candidate_email or "").strip().lower()
+    if clean_email and not is_valid_college_email(clean_email):
+        raise HTTPException(status_code=400, detail="Only college email addresses ending with @anurag.edu.in are allowed.")
+
+    clean_dept = normalize_department(body.department or "")
     await db.upsert_session(
         body.session_id, body.candidate_name, body.roll_number,
         body.mobile_number, body.academic_year,
         body.role, body.subject_key, body.mode, started_at,
+        clean_dept, clean_email
     )
     return {"ok": True, "session_id": body.session_id, "started_at": started_at}
 
@@ -374,8 +408,10 @@ async def session_report(session_id: str):
 
 
 @app.get("/api/sessions")
-async def list_sessions():
-    return {"sessions": await db.list_sessions()}
+async def list_sessions(department: Optional[str] = None):
+    dept_clean = (department or "").strip().lower()
+    dept_param = None if (not dept_clean or dept_clean == "all") else normalize_department(dept_clean)
+    return {"sessions": await db.list_sessions(department=dept_param)}
 
 
 @app.get("/api/session/{session_id}/answers")
@@ -820,24 +856,28 @@ async def rag_upload_document(
     file: UploadFile = File(...),
     subject_key: str = Form("global"),
 ):
-    """Uploads a PDF or text syllabus/material document and indexes it into the FAISS vectorstore."""
+    """Uploads a PDF or text syllabus/material document and automatically indexes it into the FAISS vectorstore."""
     try:
         content = await file.read()
         if not content:
             raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
+        store = get_rag_store()
+        # Duplicate detection: check if file is already present
+        if store.has_document(file.filename, subject_key=subject_key):
+            raise HTTPException(status_code=409, detail="PDF already present")
+
         chunks = process_document_bytes(content, file.filename)
         if not chunks:
             raise HTTPException(status_code=400, detail="Could not extract any readable text chunks from document.")
 
-        store = get_rag_store()
         added_count = store.add_documents(chunks, subject_key=subject_key)
         return {
             "ok": True,
             "filename": file.filename,
             "subject_key": subject_key,
             "chunks_added": added_count,
-            "message": f"Successfully indexed {added_count} chunks into '{subject_key}' knowledge base.",
+            "message": f"Successfully built knowledge base automatically from '{file.filename}' ({added_count} chunks indexed).",
         }
     except HTTPException:
         raise
@@ -898,26 +938,49 @@ async def generate_assessment(payload: AssessmentGeneratePayload):
     
     print(f"\n--- [DEBUG] TEACHER AI RETRIEVAL ---")
     print(f"1. Query received: {payload.prompt}")
-    print(f"2. Filters/metadata used: subject_key='{payload.subject_key}'")
+    print(f"2. Filters/metadata used: subject_key='{payload.subject_key}', source_filename='{payload.source_filename}'")
     
-    # Step 1: Search the specific subject key
-    chunks = store.similarity_search(query=payload.prompt, subject_key=payload.subject_key, top_k=10)
-    
-    # Step 2: If no results from specific key, broaden to all indexed subjects
+    chunks = []
+    # Step 1: If specific source_filename is requested, fetch chunks strictly for that file
+    if payload.source_filename:
+        chunks = store.get_document_chunks(payload.source_filename, subject_key=payload.subject_key)
+        if not chunks:
+            chunks = store.get_document_chunks(payload.source_filename, subject_key=None)
+
+    # Step 2: If no specific file or similarity search needed
     if not chunks:
-        print(f"[Generate] No chunks found for subject_key='{payload.subject_key}'. Searching all indices.")
-        chunks = store.similarity_search(query=payload.prompt, subject_key=None, top_k=10)
-    
+        query = payload.prompt.strip()
+        chunks = store.similarity_search(query=query, subject_key=payload.subject_key, top_k=15)
+        
+        if not chunks:
+            print(f"[Generate] No chunks found for subject_key='{payload.subject_key}'. Searching all indices.")
+            chunks = store.similarity_search(query=query, subject_key=None, top_k=15)
+        
+        # If prompt was generic or similarity returned few, retrieve all subject chunks from uploaded PDF(s)
+        is_generic = any(kw in query.lower() for kw in ["uploaded pdf", "generate quiz", "generate viva", "generate assessment", "from the pdf", "from this document", "create test"])
+        if not chunks or is_generic:
+            subject_chunks = store.get_subject_chunks(payload.subject_key)
+            if not subject_chunks:
+                subject_chunks = store.get_subject_chunks(None)
+            if subject_chunks:
+                existing_texts = set([c.get("text", "")[:50] for c in chunks])
+                for sc in subject_chunks:
+                    if sc.get("text", "")[:50] not in existing_texts:
+                        chunks.append(sc)
+                chunks = chunks[:20]
+
+    # Step 3: Strict check -- if no PDF content exists in the knowledge base, do not generate
+    if not chunks:
+        raise HTTPException(
+            status_code=400,
+            detail="No PDF documents found in the Knowledge Base for this subject. Please upload a subject PDF first."
+        )
+
     print(f"3. Number of chunks retrieved: {len(chunks)}")
-    if chunks:
-        doc_names = list(set([c.get('source', 'Unknown') for c in chunks]))
-        print(f"4. Names of retrieved documents: {doc_names}")
-        print(f"5. Chunks sent to Groq/Llama (first 2 previews):")
-        for i, c in enumerate(chunks[:2]):
-            print(f"   - Chunk {i+1} [{c.get('source')}]: {c.get('text', '')[:100]}...")
-    print(f"------------------------------------\n")
+    doc_names = list(set([c.get('source', 'Uploaded PDF') for c in chunks]))
+    print(f"4. Names of retrieved documents: {doc_names}")
     
-    # Step 4: Generate questions from chunks (raises ValueError if no content)
+    # Step 4: Generate questions strictly from chunks
     generator = AssessmentGenerator()
     try:
         questions = generator.generate(
@@ -931,11 +994,16 @@ async def generate_assessment(payload: AssessmentGeneratePayload):
         if "NO_RAG_CONTENT" in str(e):
             raise HTTPException(
                 status_code=422,
-                detail="No relevant content found in the uploaded documents. Please upload a PDF first in the Syllabus & RAG section, then try again."
+                detail="No readable content found in the uploaded documents. Please upload a valid PDF first."
             )
         raise HTTPException(status_code=500, detail=str(e))
     
-    return {"questions": questions}
+    return {
+        "questions": questions,
+        "source_documents": doc_names,
+        "mode": payload.mode,
+        "count": len(questions)
+    }
 
 
 
@@ -991,3 +1059,260 @@ if __name__ == "__main__":
         port=int(os.getenv("PORT", "8000")),
         reload=True,
     )
+
+
+# ---------- Faculty Management & Queries ----------
+class FacultySignupPayload(BaseModel):
+    email: str
+    name: str
+    department: str
+    phone: Optional[str] = ""
+    designation: Optional[str] = "Professor"
+    passcode: str
+
+
+class FacultyLoginPayload(BaseModel):
+    email: str
+    passcode: str
+
+
+class FacultyGuestPayload(BaseModel):
+    name: Optional[str] = "Guest Faculty"
+    department: str
+
+
+class FacultyQueryPayload(BaseModel):
+    email: str
+    name: str
+    current_dept: str
+    target_dept: str
+    phone: Optional[str] = ""
+    reason: Optional[str] = ""
+
+
+@app.get("/api/faculty/departments")
+async def get_faculty_departments():
+    return {"departments": ALLOWED_DEPARTMENTS}
+
+
+@app.post("/api/faculty/signup")
+async def faculty_signup(payload: FacultySignupPayload):
+    try:
+        faculty = await db_register_faculty(
+            email=payload.email,
+            name=payload.name,
+            department=payload.department,
+            phone=payload.phone or "",
+            designation=payload.designation or "Professor",
+            passcode=payload.passcode
+        )
+        return {"ok": True, "faculty": faculty}
+    except ValueError as e:
+        msg = str(e)
+        if msg == "already signed up for one dept":
+            raise HTTPException(status_code=409, detail="already signed up for one dept")
+        raise HTTPException(status_code=400, detail=msg)
+
+
+@app.post("/api/faculty/login")
+async def faculty_login(payload: FacultyLoginPayload):
+    try:
+        faculty = await db_authenticate_faculty(payload.email, payload.passcode)
+        if not faculty:
+            raise HTTPException(
+                status_code=401, 
+                detail="Invalid credentials. Use demo passcode 'teacher123' or register."
+            )
+        # Remove passcode before returning
+        faculty.pop("passcode", None)
+        is_admin = (faculty.get("email", "").lower() == "admin@anurag.edu.in") or (faculty.get("department") == "all")
+        faculty["role"] = "Dean / Super Admin" if is_admin else (faculty.get("designation") or "Professor")
+        faculty["is_guest"] = False
+        faculty["is_admin"] = is_admin
+        if is_admin:
+            faculty["department"] = "all"
+        return {"ok": True, "faculty": faculty}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/faculty/guest")
+async def faculty_guest(payload: FacultyGuestPayload):
+    dept = normalize_department(payload.department)
+    if dept not in ALLOWED_DEPARTMENTS:
+        raise HTTPException(status_code=400, detail=f"Invalid department. Allowed: {', '.join(ALLOWED_DEPARTMENTS)}")
+    
+    return {
+        "ok": True,
+        "faculty": {
+            "name": payload.name or "Guest Faculty",
+            "email": f"guest.{dept}@anurag.edu.in",
+            "department": dept,
+            "designation": "Guest Observer",
+            "role": "Guest Faculty",
+            "is_guest": True
+        }
+    }
+
+
+@app.post("/api/faculty/query")
+async def submit_faculty_query(payload: FacultyQueryPayload):
+    try:
+        query_record = await db_submit_faculty_query(
+            email=payload.email,
+            name=payload.name,
+            current_dept=payload.current_dept,
+            target_dept=payload.target_dept,
+            phone=payload.phone or "",
+            reason=payload.reason or ""
+        )
+        return {"ok": True, "query": query_record}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/faculty/queries")
+async def list_faculty_queries(email: Optional[str] = None):
+    queries = await db_list_faculty_queries(email=email)
+    return {"queries": queries}
+
+
+class QueryStatusUpdatePayload(BaseModel):
+    status: str
+
+
+@app.patch("/api/faculty/query/{query_id}")
+async def update_faculty_query_status(query_id: int, payload: QueryStatusUpdatePayload):
+    updated = await db_update_faculty_query(query_id, payload.status)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Query not found")
+    return {"ok": True, "query": updated}
+
+
+# --- Academic Assessment Mode Assignment Models & Endpoints ---
+class AssignModePayload(BaseModel):
+    faculty_email: str
+    department: str
+    academic_year: str = "3rd Year"
+    section: str = "Section A"
+    assigned_mode: str = "oral" # "oral", "written", "quiz", "open"
+    student_roll: Optional[str] = None
+    title: Optional[str] = None
+
+
+@app.get("/api/assignments/check")
+async def check_student_assignment(
+    department: str = "cse", 
+    academic_year: str = "3rd Year", 
+    section: str = "Section A", 
+    roll_number: Optional[str] = None
+):
+    """Checks whether this student or section has a mandated test mode."""
+    res = await db_get_student_assignment(department, academic_year, section, roll_number)
+    return res
+
+
+@app.get("/api/faculty/assignments")
+async def list_faculty_assignments(department: str = "cse"):
+    assignments = await db_list_department_assignments(department)
+    return {"assignments": assignments}
+
+
+@app.post("/api/faculty/assignments")
+async def create_faculty_assignment(payload: AssignModePayload):
+    try:
+        record = await db_create_or_update_assignment(
+            faculty_email=payload.faculty_email,
+            department=payload.department,
+            academic_year=payload.academic_year,
+            section=payload.section,
+            assigned_mode=payload.assigned_mode,
+            student_roll=payload.student_roll,
+            title=payload.title
+        )
+        return {"ok": True, "assignment": record}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/faculty/assignment/{assignment_id}")
+async def delete_faculty_assignment(assignment_id: int):
+    deleted = await db_delete_assignment(assignment_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    return {"ok": True, "deleted_id": assignment_id}
+
+
+# --- Subject & Faculty Question Validation Flow ---
+class SubjectValidationRequestPayload(BaseModel):
+    department: str
+    subject: str
+    student_roll: str
+    student_name: str
+    student_email: Optional[str] = None
+
+
+class SubjectApprovalPayload(BaseModel):
+    department: str
+    subject: str
+    faculty_email: str
+
+
+
+
+
+@app.post("/api/academic/request-validation")
+async def request_subject_validation(payload: SubjectValidationRequestPayload):
+    """Student dispatches request to faculty to validate/approve questions for a subject."""
+    res = await db_request_subject_validation(
+        department=payload.department,
+        subject=payload.subject,
+        student_roll=payload.student_roll,
+        student_name=payload.student_name,
+        student_email=payload.student_email
+    )
+    return res
+
+
+@app.get("/api/faculty/validation-tasks")
+async def list_faculty_validation_tasks(department: str = "cse"):
+    """Faculty views subjects waiting for question verification & approval."""
+    tasks = await db_get_faculty_validation_tasks(department)
+    return {"tasks": tasks}
+
+
+@app.post("/api/faculty/approve-subject")
+async def approve_subject_questions(payload: SubjectApprovalPayload):
+    """Faculty reviews & approves subject questions; dispatches student notifications."""
+    res = await db_approve_subject_questions(
+        department=payload.department,
+        subject=payload.subject,
+        faculty_email=payload.faculty_email
+    )
+    return res
+
+
+@app.get("/api/student/notifications")
+async def get_student_notifications(roll_number: str):
+    """Student polls/fetches notifications regarding approved subject questions."""
+    notifications = await db_get_student_notifications(roll_number)
+    return {"notifications": notifications}
+
+
+class UpdatePasscodePayload(BaseModel):
+    email: str
+    current_passcode: str
+    new_passcode: str
+
+
+@app.post("/api/faculty/update-passcode")
+async def update_faculty_passcode(payload: UpdatePasscodePayload):
+    try:
+        await db_update_faculty_passcode(
+            email=payload.email,
+            current_passcode=payload.current_passcode,
+            new_passcode=payload.new_passcode
+        )
+        return {"ok": True, "message": "Passcode updated successfully."}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
