@@ -7,13 +7,13 @@ import {
   Users, 
   Bot, 
   ClipboardList, 
-  Database, 
   Library, 
   BarChart3, 
   Settings,
   LogOut,
   GraduationCap,
-  ShieldCheck
+  ShieldCheck,
+  BookOpen
 } from "lucide-react";
 
 export function TeacherSidebar() {
@@ -37,9 +37,9 @@ export function TeacherSidebar() {
   const navItems = [
     { name: "Dashboard", href: "/teacher/dashboard", icon: LayoutDashboard },
     { name: "Students", href: "/teacher/students", icon: Users },
+    { name: "Exams", href: "/teacher/exams", icon: BookOpen },
     { name: "Teacher AI", href: "/teacher/ai", icon: Bot },
     { name: "Evaluations", href: "/teacher/evaluations", icon: ClipboardList },
-    { name: "Question Bank", href: "/teacher/questions", icon: Database },
     { name: "Syllabus & RAG", href: "/teacher/knowledge", icon: Library },
     { name: "Analytics", href: "/teacher/analytics", icon: BarChart3 },
     { name: "Domain Queries", href: "/teacher/queries", icon: ClipboardList },

@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { Download, Search, Filter, ClipboardList } from "lucide-react";
 import { useTeacherContext } from "@/components/teacher/TeacherProvider";
+import { getTeacherAuthHeaders } from "@/lib/auth";
 
 const BACKEND_HTTP = process.env.NEXT_PUBLIC_BACKEND_HTTP || "http://localhost:8000";
 
@@ -12,13 +13,16 @@ export default function EvaluationsPage() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    fetch(`${BACKEND_HTTP}/api/sessions`)
+    setLoading(true);
+    const deptParam = department ? `?department=${encodeURIComponent(department)}` : "";
+    fetch(`${BACKEND_HTTP}/api/sessions${deptParam}`, { headers: getTeacherAuthHeaders() })
       .then((r) => r.json())
       .then((d) => {
         setSessions(d.sessions || []);
         setLoading(false);
-      });
-  }, []);
+      })
+      .catch(() => setLoading(false));
+  }, [department]);
 
   const downloadReport = (id: string) => {
     window.open(`${BACKEND_HTTP}/api/session/${id}/report`, "_blank");

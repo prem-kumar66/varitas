@@ -8,6 +8,7 @@ type TeacherContextType = {
   isGuest: boolean;
   isAdmin: boolean;
   assignedDepartment: string | null;
+  email: string | null;
   setDepartment: (dept: string) => void;
   setYear: (yr: string) => void;
   setSection: (sec: string) => void;
@@ -23,6 +24,7 @@ export function TeacherProvider({ children }: { children: ReactNode }) {
   const [isGuest, setIsGuest] = useState<boolean>(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [assignedDepartment, setAssignedDepartment] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -36,6 +38,9 @@ export function TeacherProvider({ children }: { children: ReactNode }) {
           if (auth.department) {
             facultyDept = auth.department.toLowerCase();
             setAssignedDepartment(facultyDept);
+          }
+          if (auth.email) {
+            setEmail(auth.email);
           }
           if (auth.is_guest) {
             facultyGuest = true;
@@ -51,12 +56,12 @@ export function TeacherProvider({ children }: { children: ReactNode }) {
       const storedYear = localStorage.getItem("veritas_teacher_year");
       const storedSection = localStorage.getItem("veritas_teacher_section");
       
-      // If regular faculty, lock department to assigned facultyDept
-      if (facultyDept && !facultyGuest) {
+      // Default to assigned department on first load, but allow overrides
+      if (storedDept) {
+        setDepartmentState(storedDept);
+      } else if (facultyDept) {
         setDepartmentState(facultyDept);
         localStorage.setItem("veritas_teacher_dept", facultyDept);
-      } else if (storedDept) {
-        setDepartmentState(storedDept);
       }
 
       if (storedYear) setYearState(storedYear);
@@ -65,11 +70,6 @@ export function TeacherProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setDepartment = (dept: string) => {
-    // Admin and guests can switch freely. Regular faculty is locked to assigned department.
-    if (!isAdmin && !isGuest && assignedDepartment && assignedDepartment !== "all" && assignedDepartment.toLowerCase() !== dept.toLowerCase()) {
-      console.warn(`Department locked to assigned department: ${assignedDepartment}`);
-      return;
-    }
     const cleanDept = dept.toLowerCase();
     setDepartmentState(cleanDept);
     localStorage.setItem("veritas_teacher_dept", cleanDept);
@@ -106,6 +106,7 @@ export function TeacherProvider({ children }: { children: ReactNode }) {
         isGuest,
         isAdmin,
         assignedDepartment,
+        email,
         setDepartment,
         setYear,
         setSection,

@@ -307,6 +307,86 @@ class RAGVectorStore:
                 all_chunks.append(chunk_copy)
         return all_chunks
 
+    def delete_document(self, filename: str, subject_key: Optional[str] = None) -> int:
+        """
+        Permanently removes all chunks of the specified document filename from the FAISS vectorstore
+        and chunk metadata. Rebuilds the FAISS index for any remaining chunks in affected subjects.
+        Returns the total number of deleted chunks.
+        """
+        target_name = os.path.basename(filename).strip().lower()
+        
+        # Determine candidate subjects: check specified subject or all loaded/disk subjects
+        subjs_to_check = set(self._indices.keys())
+        if os.path.exists(self.base_dir):
+            for entry in os.listdir(self.base_dir):
+                if os.path.isdir(os.path.join(self.base_dir, entry)):
+                    subjs_to_check.add(entry)
+
+        if subject_key:
+            clean = subject_key.lower().replace(" ", "_")
+            self._ensure_subject_loaded(clean)
+            subjs_to_check.add(clean)
+
+        for subj in list(subjs_to_check):
+            self._ensure_subject_loaded(subj)
+
+        total_deleted = 0
+        model = get_embedding_model()
+
+        for subj in list(subjs_to_check):
+            data = self._indices.get(subj)
+            if not data:
+                continue
+
+            chunks = data.get("chunks", [])
+            remaining_chunks = []
+            deleted_count = 0
+
+            for c in chunks:
+                src = os.path.basename(c.get("source", "")).strip().lower()
+                if src == target_name:
+                    deleted_count += 1
+                else:
+                    remaining_chunks.append(c)
+
+            if deleted_count > 0:
+                total_deleted += deleted_count
+                subj_dir = self._get_subject_dir(subj)
+                faiss_file = os.path.join(subj_dir, "index.faiss")
+                meta_file = os.path.join(subj_dir, "chunks.json")
+
+                if not remaining_chunks:
+                    # All chunks for this subject were from this document
+                    self.clear_index(subj)
+                else:
+                    # Rebuild FAISS index with remaining chunks
+                    try:
+                        import faiss
+                        if model is not None:
+                            texts = [c["text"] for c in remaining_chunks]
+                            embeddings = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+                            embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
+                            dim = embeddings.shape[1]
+                            new_index = faiss.IndexFlatIP(dim)
+                            new_index.add(embeddings)
+                            self._indices[subj] = {
+                                "index": new_index,
+                                "chunks": remaining_chunks,
+                            }
+                            faiss.write_index(new_index, faiss_file)
+                        else:
+                            self._indices[subj]["chunks"] = remaining_chunks
+                    except Exception as e:
+                        print(f"[RAG] Warning rebuilding FAISS index after deletion: {e}")
+                        self._indices[subj]["chunks"] = remaining_chunks
+
+                    with open(meta_file, "w", encoding="utf-8") as f:
+                        json.dump(remaining_chunks, f, indent=2)
+
+                print(f"[RAG] Permanently deleted '{filename}' from subject '{subj}' ({deleted_count} chunks removed).")
+
+        return total_deleted
+
     def clear_index(self, subject_key: str):
         """Clears index in memory and on disk for a given subject."""
         subj_clean = subject_key.lower().replace(" ", "_")

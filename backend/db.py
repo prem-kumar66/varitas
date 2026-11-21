@@ -3,10 +3,12 @@ Persistence layer — async SQLite
 Stores sessions, answers, signals, academic subjects, question banks, and answer keys.
 """
 import os
+import re
 import json
 import time
+import secrets
 import aiosqlite
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "veritas.db")
 
@@ -77,6 +79,19 @@ CREATE TABLE IF NOT EXISTS answers (
 
 CREATE INDEX IF NOT EXISTS idx_answers_session ON answers(session_id);
 
+CREATE TABLE IF NOT EXISTS students (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_email TEXT UNIQUE NOT NULL,
+    student_name TEXT NOT NULL,
+    student_roll TEXT UNIQUE NOT NULL,
+    mobile_number TEXT,
+    academic_year TEXT NOT NULL,
+    department TEXT NOT NULL,
+    section TEXT DEFAULT 'A',
+    password TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    exam_id TEXT DEFAULT ''
+);
 
 CREATE TABLE IF NOT EXISTS faculty (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,13 +168,92 @@ CREATE TABLE IF NOT EXISTS student_notifications (
     is_read INTEGER DEFAULT 0,
     created_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS exam_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_roll TEXT NOT NULL,
+    exam_id TEXT NOT NULL,
+    session_id TEXT,
+    subject TEXT,
+    score REAL DEFAULT 0.0,
+    max_score REAL DEFAULT 0.0,
+    authenticity_score REAL DEFAULT 100.0,
+    violations_count INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'completed',
+    completed_at REAL NOT NULL,
+    UNIQUE(student_roll, exam_id)
+);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    user_type TEXT NOT NULL,
+    otp TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    used INTEGER DEFAULT 0
+);
 """
 
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(SCHEMA)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                user_type TEXT NOT NULL,
+                otp TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                used INTEGER DEFAULT 0
+            )
+        """)
         # Migrate columns if existing database without new fields
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS exam_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_roll TEXT NOT NULL,
+                exam_id TEXT NOT NULL,
+                session_id TEXT,
+                subject TEXT,
+                score REAL DEFAULT 0.0,
+                max_score REAL DEFAULT 0.0,
+                authenticity_score REAL DEFAULT 100.0,
+                violations_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'completed',
+                completed_at REAL NOT NULL,
+                UNIQUE(student_roll, exam_id)
+            )
+        """)
+        # Migrate columns in exam_attempts if existing without new fields
+        attempt_cols = [c[1] for c in await (await db.execute("PRAGMA table_info(exam_attempts)")).fetchall()]
+        if "session_id" not in attempt_cols:
+            await db.execute("ALTER TABLE exam_attempts ADD COLUMN session_id TEXT")
+        if "subject" not in attempt_cols:
+            await db.execute("ALTER TABLE exam_attempts ADD COLUMN subject TEXT")
+        if "violations_count" not in attempt_cols:
+            await db.execute("ALTER TABLE exam_attempts ADD COLUMN violations_count INTEGER DEFAULT 0")
+        student_cols = [c[1] for c in await (await db.execute("PRAGMA table_info(students)")).fetchall()]
+        if "section" not in student_cols:
+            await db.execute("ALTER TABLE students ADD COLUMN section TEXT DEFAULT 'A'")
+
+        # Ensure student section accurately reflects their roll number if present
+        async with db.execute("SELECT id, student_roll, section FROM students") as cur:
+            all_st = await cur.fetchall()
+        for st_id, st_roll, st_sec in all_st:
+            if st_roll:
+                m = re.match(r"^(\d{2})eg(\d{3})([a-r])(\d{2})$", st_roll.strip().lower())
+                if m:
+                    actual_sec = m.group(3).upper()
+                    if st_sec != actual_sec:
+                        await db.execute("UPDATE students SET section = ? WHERE id = ?", (actual_sec, st_id))
+
+        notif_cols = [c[1] for c in await (await db.execute("PRAGMA table_info(student_notifications)")).fetchall()]
+        if "exam_id" not in notif_cols:
+            await db.execute("ALTER TABLE student_notifications ADD COLUMN exam_id TEXT DEFAULT ''")
+
         table_info = await (await db.execute("PRAGMA table_info(sessions)")).fetchall()
         column_names = [col[1] for col in table_info]
         if "roll_number" not in column_names:
@@ -354,20 +448,19 @@ async def finalize_session(session_id: str, ended_at: float):
 
 
 async def list_sessions(department: Optional[str] = None) -> List[Dict]:
-    """For the comparison dashboard, optionally filtered by department."""
+    """For the comparison dashboard, filtered by department (strict equality only — no LIKE to prevent 'ai' matching 'aiml')."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         if department:
-            dept_clean = department.strip().lower()
+            dept_clean = normalize_department(department.strip())
+            # Use strict equality only — LIKE '%ai%' would incorrectly match 'aiml' sessions
             query = """SELECT s.*, COUNT(a.id) as answer_count
                        FROM sessions s
                        LEFT JOIN answers a ON a.session_id = s.id AND a.is_calibration = 0
-                       WHERE LOWER(TRIM(COALESCE(s.department, ''))) = ? 
-                          OR LOWER(TRIM(COALESCE(s.department, ''))) LIKE ?
-                          OR s.subject_key IN (SELECT key FROM subjects WHERE LOWER(TRIM(COALESCE(subjects.department, ''))) = ? OR LOWER(TRIM(COALESCE(subjects.department, ''))) LIKE ?)
+                       WHERE LOWER(TRIM(COALESCE(s.department, ''))) = ?
                        GROUP BY s.id
                        ORDER BY s.started_at DESC"""
-            params = (dept_clean, f"%{dept_clean}%", dept_clean, f"%{dept_clean}%")
+            params = (dept_clean,)
             async with db.execute(query, params) as cur:
                 rows = await cur.fetchall()
                 return [dict(r) for r in rows]
@@ -381,6 +474,22 @@ async def list_sessions(department: Optional[str] = None) -> List[Dict]:
             ) as cur:
                 rows = await cur.fetchall()
                 return [dict(r) for r in rows]
+
+
+async def db_list_students_by_dept(department: str, year: Optional[str] = None) -> List[Dict]:
+    """Return all registered students for a given department (strict match), optionally filtered by year."""
+    dept_clean = normalize_department(department.strip())
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        conditions = ["LOWER(department) = ?"]
+        params_list: list = [dept_clean]
+        if year:
+            conditions.append("academic_year = ?")
+            params_list.append(year)
+        sql = f"SELECT * FROM students WHERE {' AND '.join(conditions)} ORDER BY student_roll"
+        async with db.execute(sql, tuple(params_list)) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
 
 # ---------- Question Bank & Subject CRUD ----------
 async def db_list_subjects() -> List[Dict]:
@@ -483,6 +592,49 @@ async def db_save_assessment(
         )
         await db.commit()
 
+async def db_notify_section_for_exam(
+    department: str,
+    year: str,
+    section: str,
+    exam_name: str,
+    mode: str,
+    teacher: str,
+    exam_id: Optional[str] = None,
+) -> int:
+    """Insert a test_ready notification for every registered student in the section."""
+    import time as _time
+    now = _time.time()
+    dept_clean = normalize_department(department)
+    year_clean = year.strip()
+    mode_label = {"quiz": "MCQ Quiz", "oral": "Oral Viva", "written": "Written Exam"}.get(mode, mode.title())
+    message = (
+        f"📢 New exam published by {teacher or 'your faculty'}! "
+        f"'{exam_name}' — {mode_label} mode. "
+        f"Open your assessment portal to begin now."
+    )
+    count = 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        sql = "SELECT student_roll FROM students WHERE LOWER(department) = ?"
+        args = [dept_clean]
+        if year_clean and year_clean.lower() != "all":
+            sql += " AND academic_year = ?"
+            args.append(year_clean)
+        async with db.execute(sql, tuple(args)) as cur:
+            students = await cur.fetchall()
+        for s in students:
+            roll = s["student_roll"]
+            await db.execute(
+                """INSERT INTO student_notifications
+                   (student_roll, subject, department, message, test_ready, is_read, created_at, exam_id)
+                   VALUES (?, ?, ?, ?, 1, 0, ?, ?)""",
+                (roll, exam_name, dept_clean, message, now, exam_id or "")
+            )
+            count += 1
+        await db.commit()
+    return count
+
+
 async def db_list_assessments(department: Optional[str] = None, year: Optional[str] = None) -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -520,6 +672,301 @@ async def db_get_assessment(exam_id: str) -> Optional[Dict]:
                     d["questions"] = json.loads(d["questions_json"])
                 return d
             return None
+
+
+async def db_get_subject_performance(
+    department: Optional[str] = None,
+    year: Optional[str] = None,
+    section: Optional[str] = None,
+    db_path: Optional[str] = None,
+) -> List[Dict]:
+    """
+    Computes subject performance grouped by teacher and subject directly in SQL.
+    Only includes attempts with status = 'completed' in the average score calculation.
+    Disqualified attempts are counted separately.
+    Sorted by average score ascending (lowest first, weak areas at top).
+    """
+    conditions = []
+    args = []
+    if department and department.strip():
+        dept_raw = department.strip()
+        dept_norm = normalize_department(dept_raw)
+        conditions.append("(LOWER(TRIM(a.department)) = ? OR LOWER(TRIM(a.department)) = ? OR LOWER(TRIM(a.department)) = 'all')")
+        args.extend([dept_raw.lower(), dept_norm.lower()])
+    if year and year.strip():
+        year_raw = year.strip()
+        conditions.append("(LOWER(TRIM(a.year)) = ? OR LOWER(TRIM(a.year)) = 'all')")
+        args.append(year_raw.lower())
+    if section and section.strip():
+        sec_raw = section.strip()
+        sec_clean = re.sub(r'(?i)^section\s*', '', sec_raw).upper()
+        conditions.append("(LOWER(TRIM(a.section)) = ? OR UPPER(TRIM(a.section)) = ? OR UPPER(TRIM(REPLACE(a.section, 'Section ', ''))) = ? OR LOWER(TRIM(a.section)) = 'all' OR a.section = '' OR a.section IS NULL)")
+        args.extend([sec_raw.lower(), sec_raw.upper(), sec_clean])
+
+    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    sql = f"""
+        SELECT
+            COALESCE(NULLIF(TRIM(a.teacher), ''), 'Unknown Faculty') AS teacher_name,
+            COALESCE(NULLIF(TRIM(a.subject), ''), 'General') AS subject_name,
+            COUNT(DISTINCT a.exam_id) AS exam_count,
+            COUNT(CASE WHEN ea.status = 'completed' THEN 1 END) AS student_attempts,
+            COUNT(CASE WHEN ea.status = 'disqualified' THEN 1 END) AS disqualified_attempts,
+            COALESCE(ROUND(AVG(CASE WHEN ea.status = 'completed' THEN ea.score END), 1), 0.0) AS avg_score
+        FROM assessments a
+        LEFT JOIN exam_attempts ea ON a.exam_id = ea.exam_id
+        {where_clause}
+        GROUP BY 1, 2
+        ORDER BY avg_score ASC, exam_count DESC
+    """
+
+    target_db = db_path or DB_PATH
+    async with aiosqlite.connect(target_db) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(sql, tuple(args)) as cur:
+            rows = await cur.fetchall()
+            result = []
+            for r in rows:
+                row_dict = dict(r)
+                exam_cnt = int(row_dict["exam_count"])
+                completed_cnt = int(row_dict["student_attempts"])
+                disqualified_cnt = int(row_dict["disqualified_attempts"])
+                avg_sc = float(row_dict["avg_score"])
+                result.append({
+                    "teacher": row_dict["teacher_name"],
+                    "teacher_name": row_dict["teacher_name"],
+                    "subject": row_dict["subject_name"],
+                    "exam_count": exam_cnt,
+                    "student_attempts": completed_cnt,
+                    "completed_attempts": completed_cnt,
+                    "disqualified_attempts": disqualified_cnt,
+                    "avg_score": avg_sc,
+                    "is_low_sample": exam_cnt < 3,
+                })
+            return result
+
+async def db_get_active_assessment(
+    department: str, 
+    year: str, 
+    section: str, 
+    roll_number: Optional[str] = None,
+    exam_id: Optional[str] = None
+) -> Optional[Dict]:
+    dept_clean = normalize_department(department)
+    year_clean = year.strip()
+    sec_clean = re.sub(r'(?i)^section\s*', '', section.strip()).upper() if section else ""
+    
+    inferred_sec = ""
+    if roll_number:
+        roll_match = re.match(r"^(\d{2})eg(\d{3})([a-r])(\d{2})$", roll_number.strip().lower())
+        if roll_match:
+            inferred_sec = roll_match.group(3).upper()
+
+    target_sec = sec_clean or inferred_sec
+    clean_roll = roll_number.strip().lower() if roll_number else ""
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+
+        # If specific exam_id is requested, fetch it directly
+        if exam_id and exam_id.strip():
+            async with db.execute("SELECT * FROM assessments WHERE exam_id = ?", (exam_id.strip(),)) as cur:
+                row = await cur.fetchone()
+                if row:
+                    d = dict(row)
+                    if d.get("questions_json"):
+                        try:
+                            d["questions"] = json.loads(d["questions_json"])
+                        except Exception:
+                            d["questions"] = []
+                    d["already_attempted"] = False
+                    d["attempt"] = None
+                    if clean_roll:
+                        async with db.execute(
+                            "SELECT * FROM exam_attempts WHERE LOWER(student_roll) = ? AND exam_id = ?",
+                            (clean_roll, d["exam_id"]),
+                        ) as att_cur:
+                            att_row = await att_cur.fetchone()
+                            if att_row:
+                                d["already_attempted"] = True
+                                d["attempt"] = dict(att_row)
+                    return d
+
+        # Fetch student's completed attempt exam_ids
+        attempted_exam_ids = set()
+        student_attempts = {}
+        if clean_roll:
+            async with db.execute(
+                "SELECT * FROM exam_attempts WHERE LOWER(student_roll) = ?",
+                (clean_roll,)
+            ) as cur:
+                for att in await cur.fetchall():
+                    attempted_exam_ids.add(att["exam_id"])
+                    student_attempts[att["exam_id"]] = dict(att)
+
+        # Get all assessments matching dept and year (or all/empty)
+        sql = """SELECT * FROM assessments 
+                 WHERE (LOWER(department) = ? OR LOWER(department) = 'all' OR LOWER(department) = '') 
+                 AND (LOWER(TRIM(year)) = ? OR LOWER(TRIM(year)) = 'all' OR LOWER(TRIM(year)) = '')
+                 ORDER BY created_at DESC"""
+        async with db.execute(sql, (dept_clean, year_clean.lower())) as cur:
+            rows = await cur.fetchall()
+
+        if not rows:
+            # Fallback: department match without year restriction
+            sql_dept = """SELECT * FROM assessments 
+                          WHERE (LOWER(department) = ? OR LOWER(department) = 'all' OR LOWER(department) = '')
+                          ORDER BY created_at DESC"""
+            async with db.execute(sql_dept, (dept_clean,)) as cur:
+                rows = await cur.fetchall()
+
+        selected_row = None
+        if rows:
+            # Separate into unattempted and attempted
+            unattempted = [r for r in rows if r["exam_id"] not in attempted_exam_ids]
+            attempted = [r for r in rows if r["exam_id"] in attempted_exam_ids]
+
+            # 1. From unattempted exams, try section matching:
+            # 1a. Exact section match
+            for r in unattempted:
+                r_sec = re.sub(r'(?i)^section\s*', '', str(r["section"] or '')).strip().upper()
+                if (target_sec and r_sec == target_sec) or (inferred_sec and r_sec == inferred_sec):
+                    selected_row = r
+                    break
+
+            # 1b. Match 'ALL' or 'ALL SEC' or empty section
+            if not selected_row:
+                for r in unattempted:
+                    r_sec = re.sub(r'(?i)^section\s*', '', str(r["section"] or '')).strip().upper()
+                    if r_sec in ("ALL", "ALL SEC", ""):
+                        selected_row = r
+                        break
+
+            # 1c. Any unattempted exam in the department (most recent)
+            if not selected_row and unattempted:
+                selected_row = unattempted[0]
+
+            # 2. If all exams attempted, choose most recent matching attempted exam
+            if not selected_row and attempted:
+                for r in attempted:
+                    r_sec = re.sub(r'(?i)^section\s*', '', str(r["section"] or '')).strip().upper()
+                    if (target_sec and r_sec == target_sec) or (inferred_sec and r_sec == inferred_sec):
+                        selected_row = r
+                        break
+                if not selected_row:
+                    selected_row = attempted[0]
+
+        if selected_row:
+            d = dict(selected_row)
+            if d.get("questions_json"):
+                try:
+                    d["questions"] = json.loads(d["questions_json"])
+                except Exception:
+                    d["questions"] = []
+            
+            d["already_attempted"] = d["exam_id"] in attempted_exam_ids
+            d["attempt"] = student_attempts.get(d["exam_id"])
+            return d
+
+        return None
+
+
+async def db_list_available_exams_for_student(
+    department: str,
+    year: str,
+    section: str,
+    roll_number: Optional[str] = None
+) -> List[Dict]:
+    """Returns all published assessments for this student with attempt status."""
+    dept_clean = normalize_department(department)
+    clean_roll = roll_number.strip().lower() if roll_number else ""
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+
+        attempts = {}
+        if clean_roll:
+            async with db.execute("SELECT * FROM exam_attempts WHERE LOWER(student_roll) = ?", (clean_roll,)) as cur:
+                for att in await cur.fetchall():
+                    attempts[att["exam_id"]] = dict(att)
+
+        sql = """SELECT exam_id, name, mode, subject, unit, department, year, section, teacher, difficulty, questions_json, created_at
+                 FROM assessments 
+                 WHERE (LOWER(department) = ? OR LOWER(department) = 'all' OR LOWER(department) = '') 
+                 ORDER BY created_at DESC"""
+        async with db.execute(sql, (dept_clean,)) as cur:
+            rows = await cur.fetchall()
+
+        result = []
+        for r in rows:
+            d = dict(r)
+            q_count = 0
+            if d.get("questions_json"):
+                try:
+                    q_list = json.loads(d["questions_json"])
+                    q_count = len(q_list)
+                except Exception:
+                    q_count = 0
+            d.pop("questions_json", None)
+            d["question_count"] = q_count
+            d["already_attempted"] = d["exam_id"] in attempts
+            d["attempt"] = attempts.get(d["exam_id"])
+            result.append(d)
+        return result
+
+
+async def db_record_exam_attempt(
+    student_roll: str,
+    exam_id: str,
+    session_id: Optional[str] = None,
+    subject: Optional[str] = None,
+    score: float = 0.0,
+    max_score: float = 0.0,
+    authenticity_score: float = 100.0,
+    violations_count: int = 0,
+    status: str = "completed",
+) -> Dict:
+    clean_roll = student_roll.strip().lower()
+    clean_exam = exam_id.strip()
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO exam_attempts
+               (student_roll, exam_id, session_id, subject, score, max_score, authenticity_score, violations_count, status, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(student_roll, exam_id) DO UPDATE SET
+                   session_id = excluded.session_id,
+                   subject = COALESCE(excluded.subject, exam_attempts.subject),
+                   score = excluded.score,
+                   max_score = excluded.max_score,
+                   authenticity_score = excluded.authenticity_score,
+                   violations_count = excluded.violations_count,
+                   status = excluded.status,
+                   completed_at = excluded.completed_at
+            """,
+            (clean_roll, clean_exam, session_id, subject, score, max_score, authenticity_score, violations_count, status, now),
+        )
+        await db.commit()
+    return {"ok": True, "student_roll": clean_roll, "exam_id": clean_exam, "status": status}
+
+
+async def db_get_student_attempt(student_roll: str, exam_id: str) -> Optional[Dict]:
+    clean_roll = student_roll.strip().lower()
+    clean_exam = exam_id.strip()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM exam_attempts WHERE LOWER(student_roll) = ? AND exam_id = ?",
+            (clean_roll, clean_exam),
+        ) as cur:
+            row = await cur.fetchone()
+            if row:
+                return dict(row)
+    return None
+
+
+async def db_has_student_attempted(student_roll: str, exam_id: str) -> bool:
+    attempt = await db_get_student_attempt(student_roll, exam_id)
+    return attempt is not None
 
 
 
@@ -572,6 +1019,143 @@ def normalize_department(dept: str) -> str:
     }
     return mapping.get(d, d)
 
+
+def validate_student_roll(roll_number: str, academic_year: str, department: str) -> str:
+    clean_roll = roll_number.strip().lower()
+    clean_dept = normalize_department(department)
+    
+    # Format: 23eg107b35
+    pattern = r"^(\d{2})eg(\d{3})([a-r])(\d{2})$"
+    match = re.match(pattern, clean_roll)
+    
+    if not match:
+        raise ValueError("Roll number format is invalid. It must follow the pattern YYegDEPTSECID (e.g. 23eg107b35).")
+        
+    year_code = match.group(1)
+    dept_code = match.group(2)
+    sec_code = match.group(3).upper()
+    
+    year_map = {
+        "23": "4th Year",
+        "24": "3rd Year",
+        "25": "2nd Year",
+        "26": "1st Year"
+    }
+    
+    dept_map = {
+        "107": "aiml",
+        "106": "ai",
+        "105": "cse",
+        "112": "it",
+        "109": "cse", 
+        "110": "data science",
+        "104": "ece",
+        "101": "civil",
+        "103": "mech",
+        "502": "eee",
+        "111": "ecm"
+    }
+    
+    expected_year = year_map.get(year_code)
+    if not expected_year:
+        raise ValueError(f"Unknown year code '{year_code}' in roll number.")
+        
+    if expected_year != academic_year:
+        raise ValueError(f"Roll number year code '{year_code}' implies {expected_year}, but {academic_year} was selected.")
+        
+    expected_dept = dept_map.get(dept_code)
+    if not expected_dept:
+        raise ValueError(f"Unknown department code '{dept_code}' in roll number.")
+        
+    if normalize_department(expected_dept) != clean_dept:
+        raise ValueError(f"Roll number department code ({dept_code} = {expected_dept.upper()}) does not match the selected department ({clean_dept.upper()}).")
+    
+    return sec_code
+
+async def db_register_student(
+    email: str,
+    name: str,
+    roll_number: str,
+    mobile: str,
+    academic_year: str,
+    department: str,
+    password: str,
+    section: Optional[str] = None
+) -> Dict:
+    clean_email = email.strip().lower()
+    clean_roll = roll_number.strip().lower()
+    clean_dept = normalize_department(department)
+
+    if not is_valid_college_email(clean_email):
+        raise ValueError("Only college email addresses ending with @anurag.edu.in are allowed.")
+
+    if clean_dept not in ALLOWED_DEPARTMENTS:
+        raise ValueError(f"Invalid department. Allowed: {', '.join(ALLOWED_DEPARTMENTS)}")
+
+    # Enforce Roll Number Strictness & infer section
+    inferred_sec = validate_student_roll(clean_roll, academic_year, clean_dept)
+    clean_sec = re.sub(r'(?i)^section\s*', '', (section or '').strip()).upper() if section else inferred_sec
+    if not clean_sec:
+        clean_sec = inferred_sec or "A"
+
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute(
+                """INSERT INTO students (student_email, student_name, student_roll, mobile_number, academic_year, department, section, password, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (clean_email, name.strip(), clean_roll, mobile.strip(), academic_year.strip(), clean_dept, clean_sec, password, now)
+            )
+            await db.commit()
+            return {
+                "studentEmail": clean_email,
+                "studentName": name.strip(),
+                "rollNumber": clean_roll,
+                "mobileNumber": mobile.strip(),
+                "academicYear": academic_year.strip(),
+                "department": clean_dept,
+                "section": f"Section {clean_sec}"
+            }
+        except aiosqlite.IntegrityError as e:
+            msg = str(e)
+            if "student_email" in msg or "students.student_email" in msg:
+                raise ValueError("An account with this email is already registered.")
+            elif "student_roll" in msg or "students.student_roll" in msg:
+                raise ValueError("An account with this Roll Number is already registered.")
+            else:
+                raise ValueError("Registration failed due to a duplicate record.")
+
+async def db_authenticate_student(roll_number: str, password: str) -> Optional[Dict]:
+    clean_roll = roll_number.strip().lower()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM students WHERE LOWER(student_roll) = ?", (clean_roll,)) as cur:
+            row = await cur.fetchone()
+            if not row:
+                return None
+            
+            # Since this is a prototype, we're checking plain text.
+            if row["password"] == password:
+                sec_val = None
+                try:
+                    sec_val = row["section"]
+                except Exception:
+                    pass
+                if not sec_val:
+                    match = re.match(r"^(\d{2})eg(\d{3})([a-r])(\d{2})$", clean_roll)
+                    sec_val = match.group(3).upper() if match else "A"
+                clean_sec_letter = re.sub(r'(?i)^section\s*', '', str(sec_val)).strip().upper() or "A"
+
+                return {
+                    "studentEmail": row["student_email"],
+                    "studentName": row["student_name"],
+                    "rollNumber": row["student_roll"],
+                    "mobileNumber": row["mobile_number"],
+                    "academicYear": row["academic_year"],
+                    "department": row["department"],
+                    "section": f"Section {clean_sec_letter}"
+                }
+            return None
 
 async def db_register_faculty(
     email: str,
@@ -632,8 +1216,6 @@ async def db_authenticate_faculty(email: str, passcode: str) -> Optional[Dict]:
             saved_pass = faculty.get("passcode", "")
             p_test = passcode.strip()
             if saved_pass and saved_pass == p_test:
-                return faculty
-            if p_test in ["teacher123", "admin123", "admin"]:
                 return faculty
             return None
 
@@ -708,6 +1290,113 @@ async def db_update_faculty_query(query_id: int, new_status: str) -> Optional[Di
         await db.commit()
         q["status"] = new_status.lower()
         return q
+
+
+# --- Password Reset & OTP Verification ---
+async def db_create_password_reset_otp(email: str, user_type: str = "student") -> Tuple[str, str]:
+    clean_email = email.strip().lower()
+    if not is_valid_college_email(clean_email):
+        raise ValueError("Only college email addresses ending with @anurag.edu.in are allowed.")
+    
+    clean_user_type = user_type.strip().lower()
+    now = time.time()
+    expires_at = now + (10 * 60)  # 10 minutes validity
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        user_name = "User"
+        if clean_user_type == "student":
+            async with db.execute("SELECT student_name FROM students WHERE LOWER(student_email) = ?", (clean_email,)) as cur:
+                row = await cur.fetchone()
+                if not row:
+                    raise ValueError(f"No student account found registered with {clean_email}")
+                user_name = row["student_name"]
+        elif clean_user_type == "faculty":
+            async with db.execute("SELECT name FROM faculty WHERE LOWER(email) = ?", (clean_email,)) as cur:
+                row = await cur.fetchone()
+                if not row:
+                    raise ValueError(f"No faculty account found registered with {clean_email}")
+                user_name = row["name"]
+        else:
+            raise ValueError("Invalid user type. Must be 'student' or 'faculty'.")
+
+        # Generate secure 6-digit numeric OTP
+        otp = f"{secrets.randbelow(900000) + 100000}"
+
+        # Invalidate previous unused OTPs for this email & user_type
+        await db.execute(
+            "UPDATE password_resets SET used = 1 WHERE LOWER(email) = ? AND user_type = ? AND used = 0",
+            (clean_email, clean_user_type)
+        )
+
+        # Insert new OTP record
+        await db.execute(
+            """INSERT INTO password_resets (email, user_type, otp, created_at, expires_at, used)
+               VALUES (?, ?, ?, ?, ?, 0)""",
+            (clean_email, clean_user_type, otp, now, expires_at)
+        )
+        await db.commit()
+
+        return otp, user_name
+
+
+async def db_verify_password_reset_otp(email: str, otp: str, user_type: str = "student") -> bool:
+    clean_email = email.strip().lower()
+    clean_otp = otp.strip()
+    clean_user_type = user_type.strip().lower()
+    now = time.time()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM password_resets 
+               WHERE LOWER(email) = ? AND user_type = ? AND otp = ? AND used = 0
+               ORDER BY created_at DESC LIMIT 1""",
+            (clean_email, clean_user_type, clean_otp)
+        ) as cur:
+            row = await cur.fetchone()
+            if not row:
+                raise ValueError("Invalid or expired verification code.")
+            if row["expires_at"] < now:
+                raise ValueError("Verification code has expired. Please request a new code.")
+            return True
+
+
+async def db_reset_password_with_otp(email: str, otp: str, new_password: str, user_type: str = "student") -> bool:
+    clean_email = email.strip().lower()
+    clean_otp = otp.strip()
+    clean_user_type = user_type.strip().lower()
+    new_pass = new_password.strip()
+
+    if not new_pass or len(new_pass) < 4:
+        raise ValueError("Password must be at least 4 characters long.")
+
+    # First verify the OTP
+    await db_verify_password_reset_otp(clean_email, clean_otp, clean_user_type)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        if clean_user_type == "student":
+            cur = await db.execute(
+                "UPDATE students SET password = ? WHERE LOWER(student_email) = ?",
+                (new_pass, clean_email)
+            )
+            if cur.rowcount == 0:
+                raise ValueError("Student account not found.")
+        elif clean_user_type == "faculty":
+            cur = await db.execute(
+                "UPDATE faculty SET passcode = ? WHERE LOWER(email) = ?",
+                (new_pass, clean_email)
+            )
+            if cur.rowcount == 0:
+                raise ValueError("Faculty account not found.")
+
+        # Mark OTP as used
+        await db.execute(
+            "UPDATE password_resets SET used = 1 WHERE LOWER(email) = ? AND user_type = ? AND otp = ?",
+            (clean_email, clean_user_type, clean_otp)
+        )
+        await db.commit()
+        return True
 
 
 # --- Test Mode Assignments ---
@@ -1009,6 +1698,24 @@ async def db_get_student_notifications(student_roll: str) -> List[Dict]:
             return [dict(r) for r in rows]
 
 
+async def db_mark_student_notifications_read(student_roll: str, notification_id: Optional[int] = None) -> int:
+    """Mark one or all notifications for a student as read (is_read = 1)."""
+    clean_roll = student_roll.strip().lower()
+    async with aiosqlite.connect(DB_PATH) as db:
+        if notification_id is not None:
+            cur = await db.execute(
+                "UPDATE student_notifications SET is_read = 1 WHERE id = ? AND LOWER(student_roll) = ?",
+                (notification_id, clean_roll),
+            )
+        else:
+            cur = await db.execute(
+                "UPDATE student_notifications SET is_read = 1 WHERE LOWER(student_roll) = ?",
+                (clean_roll,),
+            )
+        await db.commit()
+        return cur.rowcount
+
+
 async def db_update_faculty_passcode(email: str, current_passcode: str, new_passcode: str) -> bool:
     clean_email = email.strip().lower()
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1018,13 +1725,38 @@ async def db_update_faculty_passcode(email: str, current_passcode: str, new_pass
             if not row:
                 raise ValueError("Faculty record not found")
             saved = row["passcode"]
-            # Allow teacher123/admin123 bypass or direct match
-            if saved and saved != current_passcode and current_passcode not in ["teacher123", "admin123"]:
+            if saved and saved != current_passcode:
                 raise ValueError("Current passcode is incorrect.")
 
         await db.execute(
             "UPDATE faculty SET passcode = ? WHERE LOWER(email) = ?",
             (new_passcode.strip(), clean_email)
+        )
+        await db.commit()
+        return True
+
+async def db_get_faculty_profile(email: str) -> Optional[Dict]:
+    clean_email = email.strip().lower()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT name, email, department, phone, designation, created_at FROM faculty WHERE LOWER(email) = ?", (clean_email,)) as cur:
+            row = await cur.fetchone()
+            if row:
+                return dict(row)
+            return None
+
+async def db_update_faculty_profile(email: str, name: str, phone: str, designation: str) -> bool:
+    clean_email = email.strip().lower()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT id FROM faculty WHERE LOWER(email) = ?", (clean_email,)) as cur:
+            row = await cur.fetchone()
+            if not row:
+                raise ValueError("Faculty record not found")
+        
+        await db.execute(
+            "UPDATE faculty SET name = ?, phone = ?, designation = ? WHERE LOWER(email) = ?",
+            (name.strip(), phone.strip() if phone else "", designation.strip() if designation else "", clean_email)
         )
         await db.commit()
         return True

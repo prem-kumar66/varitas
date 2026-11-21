@@ -20,21 +20,25 @@ import time
 import json
 import asyncio
 import wave
+import shutil
 from typing import Dict, Set, Optional
 from contextlib import asynccontextmanager
 
 import aiosqlite
 
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form, Depends
 from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from config import GROQ_MODEL
 
 from analyzer import CognitiveAnalyzer, AnswerSegment, Baseline
 from follow_up import FollowUpGenerator
-from validator import validate_answer
+from validator import validate_answer, is_non_answer
+from scoring import compute_overall
+from auth import create_access_token, get_current_teacher_token, get_current_admin_token
 import db
 from db import (
     ALLOWED_DEPARTMENTS,
@@ -111,9 +115,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Veritas Academic", lifespan=lifespan)
+
+frontend_origins_raw = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+frontend_origins = [orig.strip() for orig in frontend_origins_raw.split(",") if orig.strip()]
+if not frontend_origins:
+    frontend_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=frontend_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -172,6 +185,7 @@ class SessionStart(BaseModel):
     subject_key: str = ""
     mode: str = "oral"
     language: str = "en"
+    exam_id: Optional[str] = None
 
 class QuestionPayload(BaseModel):
     session_id: str
@@ -206,7 +220,13 @@ class QuizAnswerPayload(BaseModel):
     session_id: str
     subject_key: str
     question_index: int
-    selected_option: int
+    question_text: str
+    selected_option: str
+    is_correct: Optional[bool] = None
+    correct_option: Optional[str] = None
+    correct_text: Optional[str] = None
+    selected_text: Optional[str] = None
+    explanation: Optional[str] = None
 
 class RAGQueryPayload(BaseModel):
     query: str
@@ -235,6 +255,7 @@ class AssessmentGeneratePayload(BaseModel):
     num_questions: int = 5
     difficulty: str = "medium"
     source_filename: Optional[str] = None
+    avoid_questions: Optional[list] = []
 
 class AssessmentPublishPayload(BaseModel):
     exam_id: str
@@ -263,7 +284,7 @@ async def get_academic_subjects(department: Optional[str] = None):
 
 
 @app.post("/api/academic/subjects")
-async def add_academic_subject(body: SubjectPayload):
+async def add_academic_subject(body: SubjectPayload, current_user: dict = Depends(get_current_teacher_token)):
     await db.db_add_subject(body.key, body.name, body.department)
     return {"ok": True}
 
@@ -275,7 +296,7 @@ async def get_academic_questions(subject_key: Optional[str] = None):
 
 
 @app.post("/api/academic/questions")
-async def add_academic_question(body: QuestionBankPayload):
+async def add_academic_question(body: QuestionBankPayload, current_user: dict = Depends(get_current_teacher_token)):
     qid = await db.db_add_question(
         body.subject_key, body.question_text, body.reference_answer,
         body.rubric_keywords, body.max_marks, body.time_limit_sec,
@@ -284,7 +305,7 @@ async def add_academic_question(body: QuestionBankPayload):
 
 
 @app.delete("/api/academic/questions/{question_id}")
-async def delete_academic_question(question_id: int):
+async def delete_academic_question(question_id: int, current_user: dict = Depends(get_current_teacher_token)):
     await db.db_delete_question(question_id)
     return {"ok": True}
 
@@ -302,9 +323,20 @@ async def get_quiz_questions(subject_key: str = "computer_science"):
 @app.post("/api/quiz/submit")
 async def submit_quiz_answer(payload: QuizAnswerPayload):
     """Validate a student's MCQ answer server-side and save the result."""
-    result = templates_mod.check_mcq_answer(
-        payload.subject_key, payload.question_index, payload.selected_option
-    )
+    if payload.is_correct is not None:
+        result = {
+            "correct": payload.is_correct,
+            "correct_answer": payload.correct_option or "",
+            "correct_answer_text": payload.correct_text or "",
+            "selected_option": payload.selected_option,
+            "selected_text": payload.selected_text or "",
+            "explanation": payload.explanation or "",
+            "score": 10 if payload.is_correct else 0,
+        }
+    else:
+        result = templates_mod.check_mcq_answer(
+            payload.subject_key, payload.question_index, payload.selected_option
+        )
     if result is None:
         raise HTTPException(status_code=400, detail="Invalid question index or subject key")
 
@@ -367,6 +399,15 @@ async def submit_quiz_answer(payload: QuizAnswerPayload):
 # ---------- Session lifecycle ----------
 @app.post("/api/session/start")
 async def session_start(body: SessionStart):
+    # Enforce single attempt policy if exam_id and roll_number are provided
+    if body.exam_id and body.roll_number:
+        already_done = await db.db_has_student_attempted(body.roll_number, body.exam_id)
+        if already_done:
+            raise HTTPException(
+                status_code=403,
+                detail="You have already completed this assessment. Re-attempts are not allowed."
+            )
+
     started_at = time.time()
     sess = get_session(body.session_id, body.language)
     sess.language = body.language
@@ -388,6 +429,7 @@ async def session_start(body: SessionStart):
 
 
 @app.post("/api/session/finalize")
+@app.post("/api/session/end")
 async def session_finalize(body: FinalizeBody):
     await db.finalize_session(body.session_id, time.time())
     return {"ok": True}
@@ -408,7 +450,7 @@ async def session_report(session_id: str):
 
 
 @app.get("/api/sessions")
-async def list_sessions(department: Optional[str] = None):
+async def list_sessions(department: Optional[str] = None, current_user: dict = Depends(get_current_teacher_token)):
     dept_clean = (department or "").strip().lower()
     dept_param = None if (not dept_clean or dept_clean == "all") else normalize_department(dept_clean)
     return {"sessions": await db.list_sessions(department=dept_param)}
@@ -470,9 +512,11 @@ async def submit_written_answer(payload: WrittenAnswerPayload):
         payload.rubric_keywords or sess.current_rubric_keywords,
     )
     accuracy = validation["accuracy_score"]
+    if is_non_answer(payload.answer_text, payload.question):
+        accuracy = 0.0
 
-    # Composite Score: 65% Accuracy + 35% Authenticity
-    overall_score = round((accuracy * 0.65) + (authenticity * 0.35), 1)
+    # Composite Score: gated relevance formula
+    overall_score = compute_overall(accuracy, authenticity)
 
     signals_dict = {
         "delay": scores.delay, "fluency": scores.fluency,
@@ -674,8 +718,10 @@ async def process_segment(
         sess.current_rubric_keywords,
         subject_key=sess.subject_key,
     )
-    accuracy = float(validation.get("accuracy_score", 75.0))
-    overall_score = round((accuracy * 0.65) + (authenticity * 0.35), 1)
+    accuracy = float(validation.get("accuracy_score", 0.0))
+    if is_non_answer(seg.transcript, seg.question):
+        accuracy = 0.0
+    overall_score = compute_overall(accuracy, authenticity)
 
     loop = asyncio.get_event_loop()
     follow_up = await loop.run_in_executor(
@@ -771,6 +817,8 @@ async def candidate_socket(ws: WebSocket, session_id: str):
 
     answer_buffer = bytearray()
     answer_start_time: Optional[float] = None
+    speaking_question: Optional[str] = None
+    speaking_question_end_time: Optional[float] = None
 
     try:
         while True:
@@ -785,10 +833,13 @@ async def candidate_socket(ws: WebSocket, session_id: str):
                 elif data.get("type") == "answer_start":
                     answer_buffer = bytearray()
                     answer_start_time = time.time()
+                    speaking_question = data.get("question") or sess.current_question
+                    speaking_question_end_time = sess.question_end_time
                     await sess.broadcast({"type": "candidate_speaking", "started_at": answer_start_time})
 
                 elif data.get("type") == "answer_end" and answer_start_time:
                     answer_end_time = time.time()
+                    server_duration = answer_end_time - answer_start_time
                     if len(answer_buffer) > 8000:  # >0.25s of audio
                         loop = asyncio.get_event_loop()
                         transcript, _dur, _proc = await loop.run_in_executor(
@@ -797,17 +848,19 @@ async def candidate_socket(ws: WebSocket, session_id: str):
                         )
                         if transcript:
                             seg = AnswerSegment(
-                                question=sess.current_question,
+                                question=speaking_question or sess.current_question,
                                 transcript=transcript,
-                                question_end_time=sess.question_end_time,
+                                question_end_time=speaking_question_end_time or sess.question_end_time,
                                 answer_start_time=answer_start_time,
                                 answer_end_time=answer_end_time,
                                 word_count=len(transcript.split()),
-                                duration_sec=answer_end_time - answer_start_time,
+                                duration_sec=server_duration,
                             )
                             await process_segment(sess, seg, is_calibration=sess.calibration_pending)
                     answer_buffer = bytearray()
                     answer_start_time = None
+                    speaking_question = None
+                    speaking_question_end_time = None
 
                 elif data.get("type") == "webrtc":
                     await sess.broadcast({"type": "webrtc_from_candidate", "payload": data["payload"]})
@@ -855,6 +908,7 @@ async def interviewer_socket(ws: WebSocket, session_id: str):
 async def rag_upload_document(
     file: UploadFile = File(...),
     subject_key: str = Form("global"),
+    current_user: dict = Depends(get_current_teacher_token),
 ):
     """Uploads a PDF or text syllabus/material document and automatically indexes it into the FAISS vectorstore."""
     try:
@@ -872,6 +926,18 @@ async def rag_upload_document(
             raise HTTPException(status_code=400, detail="Could not extract any readable text chunks from document.")
 
         added_count = store.add_documents(chunks, subject_key=subject_key)
+
+        # Permanently save uploaded file bytes to disk
+        try:
+            clean_subj = subject_key.lower().replace(" ", "_")
+            upload_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "data", "uploads", clean_subj))
+            os.makedirs(upload_dir, exist_ok=True)
+            saved_path = os.path.join(upload_dir, file.filename)
+            with open(saved_path, "wb") as f:
+                f.write(content)
+        except Exception as e:
+            print(f"[RAG API] Warning: could not persist physical file: {e}")
+
         return {
             "ok": True,
             "filename": file.filename,
@@ -887,14 +953,70 @@ async def rag_upload_document(
 
 
 @app.get("/api/rag/documents")
-async def rag_list_documents(subject_key: Optional[str] = None):
-    """Lists indexed documents and chunks summary."""
+async def rag_list_documents(subject_key: Optional[str] = None, current_user: dict = Depends(get_current_teacher_token)):
+    """Lists indexed documents and chunks summary. Fuzzy-matches subject_key if exact match not found."""
     store = get_rag_store()
-    return {"sources": store.list_indexed_sources(subject_key)}
+    resolved_key = subject_key
+    if subject_key:
+        clean = subject_key.lower().replace(" ", "_")
+        available = list(store._indices.keys())
+        if clean not in available:
+            # Fuzzy match
+            req_parts = set(clean.replace("_", " ").split())
+            best_key, best_score = None, 0
+            for key in available:
+                if key == "global":
+                    continue
+                key_parts = set(key.replace("_", " ").split())
+                overlap = len(req_parts & key_parts)
+                if overlap > best_score:
+                    best_score = overlap
+                    best_key = key
+            if best_score >= 2:
+                resolved_key = best_key
+                print(f"[RAG docs] Fuzzy matched '{clean}' -> '{best_key}'")
+    return {"sources": store.list_indexed_sources(resolved_key)}
+
+
+@app.delete("/api/rag/document")
+async def rag_delete_document(filename: str, subject_key: Optional[str] = None, current_user: dict = Depends(get_current_teacher_token)):
+    """Permanently removes a document and its indexed chunks from the RAG knowledge base and deletes the physical file."""
+    if not filename or not filename.strip():
+        raise HTTPException(status_code=400, detail="Document filename is required.")
+
+    store = get_rag_store()
+    deleted_chunks = store.delete_document(filename=filename, subject_key=subject_key)
+
+    # Permanently delete physical file if stored
+    deleted_file = False
+    clean_target = os.path.basename(filename).strip().lower()
+    upload_base = os.path.abspath(os.path.join(os.path.dirname(__file__), "data", "uploads"))
+    if os.path.exists(upload_base):
+        for root, _, files in os.walk(upload_base):
+            for f in files:
+                if f.lower() == clean_target:
+                    try:
+                        os.remove(os.path.join(root, f))
+                        deleted_file = True
+                    except Exception as e:
+                        print(f"[RAG API] Error deleting physical file {f}: {e}")
+
+    return {
+        "ok": True,
+        "filename": filename,
+        "deleted_chunks": deleted_chunks,
+        "file_removed": deleted_file,
+        "message": f"Successfully permanently deleted '{filename}' ({deleted_chunks} chunks removed).",
+    }
+
+
+@app.delete("/api/rag/documents/{filename:path}")
+async def rag_delete_document_path(filename: str, subject_key: Optional[str] = None, current_user: dict = Depends(get_current_teacher_token)):
+    return await rag_delete_document(filename=filename, subject_key=subject_key, current_user=current_user)
 
 
 @app.post("/api/rag/query")
-async def rag_query_context(payload: RAGQueryPayload):
+async def rag_query_context(payload: RAGQueryPayload, current_user: dict = Depends(get_current_teacher_token)):
     """Performs similarity search to retrieve top knowledge base chunks for a question."""
     store = get_rag_store()
     results = store.similarity_search(
@@ -906,7 +1028,7 @@ async def rag_query_context(payload: RAGQueryPayload):
 
 
 @app.post("/api/rag/evaluate")
-async def rag_evaluate_answer(payload: RAGEvaluatePayload):
+async def rag_evaluate_answer(payload: RAGEvaluatePayload, current_user: dict = Depends(get_current_teacher_token)):
     """Runs full RAGAS-style evaluation on a student answer against retrieved syllabus excerpts."""
     store = get_rag_store()
     query = f"{payload.question} {payload.reference_answer or ''}".strip()
@@ -924,50 +1046,103 @@ async def rag_evaluate_answer(payload: RAGEvaluatePayload):
 
 
 @app.delete("/api/rag/clear/{subject_key}")
-async def rag_clear_subject(subject_key: str):
-    """Clears indexed FAISS vector database for a given subject."""
+async def rag_clear_subject(subject_key: str, current_user: dict = Depends(get_current_teacher_token)):
+    """Clears indexed FAISS vector database and uploaded files for a given subject."""
     store = get_rag_store()
     store.clear_index(subject_key)
-    return {"ok": True, "message": f"Index cleared for '{subject_key}'."}
+
+    # Clean up physical files for that subject
+    clean_subj = subject_key.lower().replace(" ", "_")
+    upload_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "data", "uploads", clean_subj))
+    if os.path.exists(upload_dir):
+        try:
+            shutil.rmtree(upload_dir)
+        except Exception as e:
+            print(f"[RAG API] Error removing upload dir: {e}")
+
+    return {"ok": True, "message": f"Knowledge base index and files permanently cleared for '{subject_key}'."}
+
 
 
 # ---------- Assessments ----------
 @app.post("/api/assessments/generate")
-async def generate_assessment(payload: AssessmentGeneratePayload):
+async def generate_assessment(payload: AssessmentGeneratePayload, current_user: dict = Depends(get_current_teacher_token)):
     store = get_rag_store()
     
     print(f"\n--- [DEBUG] TEACHER AI RETRIEVAL ---")
     print(f"1. Query received: {payload.prompt}")
     print(f"2. Filters/metadata used: subject_key='{payload.subject_key}', source_filename='{payload.source_filename}'")
-    
-    chunks = []
-    # Step 1: If specific source_filename is requested, fetch chunks strictly for that file
-    if payload.source_filename:
-        chunks = store.get_document_chunks(payload.source_filename, subject_key=payload.subject_key)
-        if not chunks:
-            chunks = store.get_document_chunks(payload.source_filename, subject_key=None)
 
-    # Step 2: If no specific file or similarity search needed
+    # --- Fuzzy subject key resolution ---
+    # The frontend may send "ai_4th_year" but the index is stored as "ai_&_ml_4th_year".
+    # Find the best-matching indexed subject key by prefix/suffix similarity.
+    def _resolve_subject_key(requested: str) -> Optional[str]:
+        if not requested:
+            return None
+        clean = requested.lower().replace(" ", "_")
+        available = list(store._indices.keys())
+        # Exact match
+        if clean in available:
+            return clean
+        # Fuzzy: find all indexed keys that share department prefix or year suffix
+        req_parts = set(clean.replace("_", " ").split())
+        best_key = None
+        best_score = 0
+        for key in available:
+            if key == "global":
+                continue
+            key_parts = set(key.replace("_", " ").split())
+            overlap = len(req_parts & key_parts)
+            if overlap > best_score:
+                best_score = overlap
+                best_key = key
+        # Only accept if at least 2 words overlap (avoid false positives)
+        if best_score >= 2:
+            print(f"[Generate] Fuzzy matched '{clean}' -> '{best_key}' (overlap={best_score})")
+            return best_key
+        return None
+
+    resolved_key = _resolve_subject_key(payload.subject_key)
+    print(f"3. Resolved subject key: '{resolved_key}'")
+
+    chunks = []
+    # Step 1: If specific source_filename is selected, fetch ONLY chunks from that file
+    if payload.source_filename:
+        chunks = store.get_document_chunks(payload.source_filename, subject_key=resolved_key)
+        if not chunks:
+            # Try searching all subjects for this specific file
+            chunks = store.get_document_chunks(payload.source_filename, subject_key=None)
+        if chunks:
+            print(f"4. Loaded {len(chunks)} chunks directly from file: {payload.source_filename}")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No indexed content found for '{payload.source_filename}'. Please re-upload the PDF in Syllabus & RAG."
+            )
+
+    # Step 2: No specific file — similarity search restricted to resolved subject only
     if not chunks:
         query = payload.prompt.strip()
-        chunks = store.similarity_search(query=query, subject_key=payload.subject_key, top_k=15)
+        if resolved_key:
+            # Restrict to the teacher's own subject index
+            chunks = store.get_subject_chunks(resolved_key)
+            print(f"4. Retrieved {len(chunks)} subject chunks from '{resolved_key}'")
         
         if not chunks:
-            print(f"[Generate] No chunks found for subject_key='{payload.subject_key}'. Searching all indices.")
-            chunks = store.similarity_search(query=query, subject_key=None, top_k=15)
-        
-        # If prompt was generic or similarity returned few, retrieve all subject chunks from uploaded PDF(s)
-        is_generic = any(kw in query.lower() for kw in ["uploaded pdf", "generate quiz", "generate viva", "generate assessment", "from the pdf", "from this document", "create test"])
-        if not chunks or is_generic:
-            subject_chunks = store.get_subject_chunks(payload.subject_key)
-            if not subject_chunks:
-                subject_chunks = store.get_subject_chunks(None)
-            if subject_chunks:
-                existing_texts = set([c.get("text", "")[:50] for c in chunks])
-                for sc in subject_chunks:
-                    if sc.get("text", "")[:50] not in existing_texts:
-                        chunks.append(sc)
-                chunks = chunks[:20]
+            # Last resort: similarity search within subject (not global fallback)
+            chunks = store.similarity_search(query=query, subject_key=resolved_key, top_k=20)
+            print(f"4. Similarity search returned {len(chunks)} chunks")
+
+    if not chunks:
+        # Check global fallback chunks
+        chunks = store.get_subject_chunks("global")
+        if not chunks:
+            chunks = store.similarity_search(query=payload.prompt.strip(), subject_key=None, top_k=10)
+
+    # If still no PDF chunks, but teacher specifically asks for an intro / warm-up question:
+    is_intro_request = any(term in payload.prompt.lower() for term in ["introduce", "introduction", "about yourself", "warm up", "warm-up", "icebreaker", "background"])
+    if not chunks and is_intro_request:
+        chunks = [{"text": f"Subject Domain: {payload.subject_key or 'Academic Assessment'}. Standard academic viva introduction and candidate background evaluation.", "source": "Academic Viva Guidelines"}]
 
     # Step 3: Strict check -- if no PDF content exists in the knowledge base, do not generate
     if not chunks:
@@ -980,15 +1155,19 @@ async def generate_assessment(payload: AssessmentGeneratePayload):
     doc_names = list(set([c.get('source', 'Uploaded PDF') for c in chunks]))
     print(f"4. Names of retrieved documents: {doc_names}")
     
-    # Step 4: Generate questions strictly from chunks
-    generator = AssessmentGenerator()
+    # Step 4: Generate questions fulfilling Teacher's Request and grounded in chunks
+    import importlib
+    import generator as gen_mod
+    importlib.reload(gen_mod)
+    generator = gen_mod.AssessmentGenerator()
     try:
-        questions = generator.generate(
+        gen_result = generator.generate(
             prompt=payload.prompt,
             mode=payload.mode,
             num_questions=payload.num_questions,
             difficulty=payload.difficulty,
             context_chunks=chunks,
+            avoid_questions=payload.avoid_questions,
         )
     except ValueError as e:
         if "NO_RAG_CONTENT" in str(e):
@@ -998,17 +1177,64 @@ async def generate_assessment(payload: AssessmentGeneratePayload):
             )
         raise HTTPException(status_code=500, detail=str(e))
     
+    if isinstance(gen_result, dict):
+        questions = gen_result.get("questions", [])
+        generation_method = gen_result.get("generation_method", "llm")
+        warning = gen_result.get("warning")
+    else:
+        questions = gen_result
+        generation_method = "llm"
+        warning = None
+
+    is_custom = gen_mod.AssessmentGenerator.is_custom_standalone_request(payload.prompt)
     return {
         "questions": questions,
-        "source_documents": doc_names,
+        "source_documents": ["Teacher's Request"] if is_custom else doc_names,
+        "is_custom": is_custom,
         "mode": payload.mode,
-        "count": len(questions)
+        "count": len(questions),
+        "generation_method": generation_method,
+        "warning": warning,
     }
 
+class TeacherChatPayload(BaseModel):
+    query: str
+    context: Optional[dict] = None
+
+@app.post("/api/teacher/chat")
+def teacher_chat(payload: TeacherChatPayload, current_user: dict = Depends(get_current_teacher_token)):
+    import os
+    try:
+        from groq import Groq
+        import httpx
+    except ImportError:
+        return {"response": "I am a Teacher AI. Please install groq to enable dynamic chat."}
+        
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key or api_key.startswith("gsk_your"):
+        return {"response": "I am a Teacher AI. Please set your GROQ_API_KEY to enable chat."}
+        
+    try:
+        client = Groq(api_key=api_key, http_client=httpx.Client())
+        system_prompt = "You are 'Teacher AI', an intelligent academic teaching assistant for Veritas Academic. Be helpful, polite, conversational, and brief. You help teachers generate quizzes, analyze topics, and manage their classes. Answer natural language realistically."
+        
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": payload.query},
+            ],
+            temperature=0.7,
+            max_tokens=1000,
+        )
+        return {"response": response.choices[0].message.content.strip()}
+    except Exception as e:
+        print(f"[Teacher Chat] Error: {e}")
+        return {"response": "I am having trouble connecting to my brain right now. Please try again later."}
 
 
 @app.post("/api/assessments")
-async def publish_assessment(payload: AssessmentPublishPayload):
+async def publish_assessment(payload: AssessmentPublishPayload, current_user: dict = Depends(get_current_teacher_token)):
     now = time.time()
     await db.db_save_assessment(
         exam_id=payload.exam_id,
@@ -1025,13 +1251,42 @@ async def publish_assessment(payload: AssessmentPublishPayload):
         questions=payload.questions,
         created_at=now,
     )
-    return {"ok": True, "exam_id": payload.exam_id}
+    # Notify all matching students immediately
+    notified = 0
+    try:
+        notified = await db.db_notify_section_for_exam(
+            department=payload.department,
+            year=payload.year,
+            section=payload.section,
+            exam_name=payload.name,
+            mode=payload.mode,
+            teacher=payload.teacher,
+            exam_id=payload.exam_id,
+        )
+    except Exception as e:
+        print(f"[Notify] Warning: could not send student notifications: {e}")
+    return {"ok": True, "exam_id": payload.exam_id, "students_notified": notified}
 
 
 @app.get("/api/assessments")
-async def list_assessments(department: Optional[str] = None, year: Optional[str] = None):
+async def list_assessments(department: Optional[str] = None, year: Optional[str] = None, current_user: dict = Depends(get_current_teacher_token)):
     assessments = await db.db_list_assessments(department, year)
     return {"assessments": assessments}
+
+
+@app.get("/api/analytics/subject-performance")
+async def get_subject_performance(
+    department: Optional[str] = None,
+    year: Optional[str] = None,
+    section: Optional[str] = None,
+    current_user: dict = Depends(get_current_teacher_token),
+):
+    rows = await db.db_get_subject_performance(
+        department=department,
+        year=year,
+        section=section,
+    )
+    return {"subject_performance": rows}
 
 
 @app.get("/api/assessments/{exam_id}")
@@ -1062,6 +1317,20 @@ if __name__ == "__main__":
 
 
 # ---------- Faculty Management & Queries ----------
+class StudentSignupPayload(BaseModel):
+    email: str
+    name: str
+    roll_number: str
+    mobile: str
+    academic_year: str
+    department: str
+    password: str
+    section: Optional[str] = "A"
+
+class StudentLoginPayload(BaseModel):
+    roll_number: str
+    password: str
+
 class FacultySignupPayload(BaseModel):
     email: str
     name: str
@@ -1090,10 +1359,129 @@ class FacultyQueryPayload(BaseModel):
     reason: Optional[str] = ""
 
 
+class ForgotPasswordRequestPayload(BaseModel):
+    email: str
+    user_type: str = "student"  # "student" or "faculty"
+
+
+class VerifyOtpPayload(BaseModel):
+    email: str
+    otp: str
+    user_type: str = "student"
+
+
+class ResetPasswordPayload(BaseModel):
+    email: str
+    otp: str
+    new_password: str
+    user_type: str = "student"
+
+
 @app.get("/api/faculty/departments")
 async def get_faculty_departments():
     return {"departments": ALLOWED_DEPARTMENTS}
 
+
+# --- Authentication & Password Recovery Endpoints ---
+@app.post("/api/auth/forgot-password/request")
+async def forgot_password_request(payload: ForgotPasswordRequestPayload):
+    try:
+        from db import db_create_password_reset_otp
+        from mailer import send_password_reset_email
+
+        clean_email = payload.email.strip().lower()
+        clean_user_type = payload.user_type.strip().lower()
+        
+        otp, user_name = await db_create_password_reset_otp(clean_email, clean_user_type)
+        
+        # Send email (or fallback to dev preview)
+        mail_res = send_password_reset_email(clean_email, user_name, otp, clean_user_type)
+        
+        resp = {
+            "ok": True,
+            "message": f"A 6-digit verification code has been sent to {clean_email}.",
+            "email": clean_email,
+            "user_type": clean_user_type,
+            "mode": mail_res.get("mode", "smtp"),
+        }
+        if mail_res.get("mode") == "preview" or mail_res.get("otp"):
+            resp["dev_code"] = otp
+            resp["preview_notice"] = f"Development mode: Code is {otp}"
+            
+        return resp
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process password reset: {str(e)}")
+
+
+@app.post("/api/auth/forgot-password/verify-otp")
+async def forgot_password_verify(payload: VerifyOtpPayload):
+    try:
+        from db import db_verify_password_reset_otp
+        clean_email = payload.email.strip().lower()
+        clean_otp = payload.otp.strip()
+        clean_user_type = payload.user_type.strip().lower()
+        
+        await db_verify_password_reset_otp(clean_email, clean_otp, clean_user_type)
+        return {"ok": True, "message": "Verification code verified successfully."}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}")
+
+
+@app.post("/api/auth/forgot-password/reset")
+async def forgot_password_reset(payload: ResetPasswordPayload):
+    try:
+        from db import db_reset_password_with_otp
+        clean_email = payload.email.strip().lower()
+        clean_otp = payload.otp.strip()
+        clean_new_pass = payload.new_password.strip()
+        clean_user_type = payload.user_type.strip().lower()
+        
+        await db_reset_password_with_otp(clean_email, clean_otp, clean_new_pass, clean_user_type)
+        return {
+            "ok": True, 
+            "message": "Password updated successfully. You can now log in with your new password."
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Password reset failed: {str(e)}")
+
+
+@app.post("/api/student/signup")
+async def student_signup(payload: StudentSignupPayload):
+    try:
+        from db import db_register_student
+        student_data = await db_register_student(
+            email=payload.email,
+            name=payload.name,
+            roll_number=payload.roll_number,
+            mobile=payload.mobile,
+            academic_year=payload.academic_year,
+            department=payload.department,
+            password=payload.password,
+            section=payload.section
+        )
+        return {"ok": True, "message": "Student account created successfully", "student": student_data}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/student/login")
+async def student_login(payload: StudentLoginPayload):
+    try:
+        from db import db_authenticate_student
+        student_data = await db_authenticate_student(
+            roll_number=payload.roll_number,
+            password=payload.password
+        )
+        if not student_data:
+            raise ValueError("Invalid roll number or password.")
+        return {"ok": True, "student": student_data}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/faculty/signup")
 async def faculty_signup(payload: FacultySignupPayload):
@@ -1121,7 +1509,7 @@ async def faculty_login(payload: FacultyLoginPayload):
         if not faculty:
             raise HTTPException(
                 status_code=401, 
-                detail="Invalid credentials. Use demo passcode 'teacher123' or register."
+                detail="Invalid credentials. Please check your email and passcode or register."
             )
         # Remove passcode before returning
         faculty.pop("passcode", None)
@@ -1131,7 +1519,15 @@ async def faculty_login(payload: FacultyLoginPayload):
         faculty["is_admin"] = is_admin
         if is_admin:
             faculty["department"] = "all"
-        return {"ok": True, "faculty": faculty}
+
+        token = create_access_token({
+            "sub": faculty["email"],
+            "email": faculty["email"],
+            "role": faculty["role"],
+            "is_admin": is_admin,
+            "department": faculty["department"],
+        })
+        return {"ok": True, "faculty": faculty, "token": token}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1142,16 +1538,26 @@ async def faculty_guest(payload: FacultyGuestPayload):
     if dept not in ALLOWED_DEPARTMENTS:
         raise HTTPException(status_code=400, detail=f"Invalid department. Allowed: {', '.join(ALLOWED_DEPARTMENTS)}")
     
+    faculty_data = {
+        "name": payload.name or "Guest Faculty",
+        "email": f"guest.{dept}@anurag.edu.in",
+        "department": dept,
+        "designation": "Guest Observer",
+        "role": "Guest Faculty",
+        "is_guest": True,
+        "is_admin": False,
+    }
+    token = create_access_token({
+        "sub": faculty_data["email"],
+        "email": faculty_data["email"],
+        "role": "Guest Faculty",
+        "is_admin": False,
+        "department": dept,
+    })
     return {
         "ok": True,
-        "faculty": {
-            "name": payload.name or "Guest Faculty",
-            "email": f"guest.{dept}@anurag.edu.in",
-            "department": dept,
-            "designation": "Guest Observer",
-            "role": "Guest Faculty",
-            "is_guest": True
-        }
+        "faculty": faculty_data,
+        "token": token,
     }
 
 
@@ -1172,7 +1578,7 @@ async def submit_faculty_query(payload: FacultyQueryPayload):
 
 
 @app.get("/api/faculty/queries")
-async def list_faculty_queries(email: Optional[str] = None):
+async def list_faculty_queries(email: Optional[str] = None, current_user: dict = Depends(get_current_admin_token)):
     queries = await db_list_faculty_queries(email=email)
     return {"queries": queries}
 
@@ -1182,7 +1588,7 @@ class QueryStatusUpdatePayload(BaseModel):
 
 
 @app.patch("/api/faculty/query/{query_id}")
-async def update_faculty_query_status(query_id: int, payload: QueryStatusUpdatePayload):
+async def update_faculty_query_status(query_id: int, payload: QueryStatusUpdatePayload, current_user: dict = Depends(get_current_admin_token)):
     updated = await db_update_faculty_query(query_id, payload.status)
     if not updated:
         raise HTTPException(status_code=404, detail="Query not found")
@@ -1213,13 +1619,13 @@ async def check_student_assignment(
 
 
 @app.get("/api/faculty/assignments")
-async def list_faculty_assignments(department: str = "cse"):
+async def list_faculty_assignments(department: str = "cse", current_user: dict = Depends(get_current_teacher_token)):
     assignments = await db_list_department_assignments(department)
     return {"assignments": assignments}
 
 
 @app.post("/api/faculty/assignments")
-async def create_faculty_assignment(payload: AssignModePayload):
+async def create_faculty_assignment(payload: AssignModePayload, current_user: dict = Depends(get_current_teacher_token)):
     try:
         record = await db_create_or_update_assignment(
             faculty_email=payload.faculty_email,
@@ -1236,7 +1642,7 @@ async def create_faculty_assignment(payload: AssignModePayload):
 
 
 @app.delete("/api/faculty/assignment/{assignment_id}")
-async def delete_faculty_assignment(assignment_id: int):
+async def delete_faculty_assignment(assignment_id: int, current_user: dict = Depends(get_current_teacher_token)):
     deleted = await db_delete_assignment(assignment_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Assignment not found")
@@ -1275,14 +1681,14 @@ async def request_subject_validation(payload: SubjectValidationRequestPayload):
 
 
 @app.get("/api/faculty/validation-tasks")
-async def list_faculty_validation_tasks(department: str = "cse"):
+async def list_faculty_validation_tasks(department: str = "cse", current_user: dict = Depends(get_current_teacher_token)):
     """Faculty views subjects waiting for question verification & approval."""
     tasks = await db_get_faculty_validation_tasks(department)
     return {"tasks": tasks}
 
 
 @app.post("/api/faculty/approve-subject")
-async def approve_subject_questions(payload: SubjectApprovalPayload):
+async def approve_subject_questions(payload: SubjectApprovalPayload, current_user: dict = Depends(get_current_teacher_token)):
     """Faculty reviews & approves subject questions; dispatches student notifications."""
     res = await db_approve_subject_questions(
         department=payload.department,
@@ -1295,8 +1701,101 @@ async def approve_subject_questions(payload: SubjectApprovalPayload):
 @app.get("/api/student/notifications")
 async def get_student_notifications(roll_number: str):
     """Student polls/fetches notifications regarding approved subject questions."""
-    notifications = await db_get_student_notifications(roll_number)
+    notifications = await db.db_get_student_notifications(roll_number)
     return {"notifications": notifications}
+
+
+class MarkNotificationsReadPayload(BaseModel):
+    student_roll: str
+    notification_id: Optional[int] = None
+
+
+@app.post("/api/student/notifications/mark-read")
+async def mark_student_notifications_read(payload: MarkNotificationsReadPayload):
+    """Mark one or all notifications as read for a student."""
+    count = await db.db_mark_student_notifications_read(
+        student_roll=payload.student_roll,
+        notification_id=payload.notification_id,
+    )
+    return {"ok": True, "marked_count": count}
+
+
+class RecordAttemptPayload(BaseModel):
+    student_roll: str
+    exam_id: str
+    session_id: Optional[str] = None
+    subject: Optional[str] = None
+    score: float = 0.0
+    max_score: float = 0.0
+    authenticity_score: float = 100.0
+    violations_count: int = 0
+    status: str = "completed"
+
+
+@app.post("/api/student/record-attempt")
+async def record_student_attempt(payload: RecordAttemptPayload):
+    """Save record that student has completed an exam attempt (enforces single attempt)."""
+    res = await db.db_record_exam_attempt(
+        student_roll=payload.student_roll,
+        exam_id=payload.exam_id,
+        session_id=payload.session_id,
+        subject=payload.subject,
+        score=payload.score,
+        max_score=payload.max_score,
+        authenticity_score=payload.authenticity_score,
+        violations_count=payload.violations_count,
+        status=payload.status,
+    )
+    return res
+
+
+@app.get("/api/student/active_exam")
+async def get_student_active_exam(
+    department: str, 
+    year: str, 
+    section: str, 
+    roll_number: Optional[str] = None,
+    exam_id: Optional[str] = None
+):
+    exam = await db.db_get_active_assessment(department, year, section, roll_number, exam_id=exam_id)
+    if not exam:
+        return {
+            "published": False,
+            "exam": None,
+            "message": "No active exam found for this department/section."
+        }
+    return {
+        "published": True,
+        "exam": exam,
+        "already_attempted": exam.get("already_attempted", False),
+        "attempt": exam.get("attempt")
+    }
+
+
+@app.get("/api/student/available_exams")
+async def get_student_available_exams(
+    department: str,
+    year: str,
+    section: str,
+    roll_number: Optional[str] = None
+):
+    """List all published assessments for this student with attempt status."""
+    exams = await db.db_list_available_exams_for_student(department, year, section, roll_number)
+    return {"exams": exams}
+
+
+@app.get("/api/students")
+async def list_department_students(department: Optional[str] = None, year: Optional[str] = None, current_user: dict = Depends(get_current_teacher_token)):
+    """List all registered students for a department from the students table."""
+    if not department:
+        return {"students": []}
+    students = await db.db_list_students_by_dept(department, year)
+    # Mask password before returning
+    safe = []
+    for s in students:
+        s.pop("password", None)
+        safe.append(s)
+    return {"students": safe}
 
 
 class UpdatePasscodePayload(BaseModel):
@@ -1304,9 +1803,14 @@ class UpdatePasscodePayload(BaseModel):
     current_passcode: str
     new_passcode: str
 
+class FacultyProfileUpdatePayload(BaseModel):
+    email: str
+    name: str
+    phone: str
+    designation: str
 
 @app.post("/api/faculty/update-passcode")
-async def update_faculty_passcode(payload: UpdatePasscodePayload):
+async def update_faculty_passcode(payload: UpdatePasscodePayload, current_user: dict = Depends(get_current_teacher_token)):
     try:
         await db_update_faculty_passcode(
             email=payload.email,
@@ -1314,5 +1818,25 @@ async def update_faculty_passcode(payload: UpdatePasscodePayload):
             new_passcode=payload.new_passcode
         )
         return {"ok": True, "message": "Passcode updated successfully."}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/faculty/profile")
+async def get_faculty_profile(email: str, current_user: dict = Depends(get_current_teacher_token)):
+    profile = await db.db_get_faculty_profile(email)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    return {"profile": profile}
+
+@app.put("/api/faculty/profile")
+async def update_faculty_profile(payload: FacultyProfileUpdatePayload, current_user: dict = Depends(get_current_teacher_token)):
+    try:
+        await db.db_update_faculty_profile(
+            email=payload.email,
+            name=payload.name,
+            phone=payload.phone,
+            designation=payload.designation
+        )
+        return {"ok": True, "message": "Profile updated successfully."}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

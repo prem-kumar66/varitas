@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useTeacherContext } from "@/components/teacher/TeacherProvider";
+import { getTeacherAuthHeaders } from "@/lib/auth";
 import { 
   FileText, 
   Send, 
@@ -64,7 +65,9 @@ export default function FacultyQueriesPage() {
   }, []);
 
   const fetchQueries = (userEmail: string) => {
-    fetch(`${BACKEND_HTTP}/api/faculty/queries?email=${encodeURIComponent(userEmail)}`)
+    fetch(`${BACKEND_HTTP}/api/faculty/queries?email=${encodeURIComponent(userEmail)}`, {
+      headers: getTeacherAuthHeaders()
+    })
       .then((r) => r.json())
       .then((d) => setQueries(d.queries || []))
       .catch(() => {});

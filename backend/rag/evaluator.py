@@ -14,6 +14,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+try:
+    from config import GROQ_MODEL
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import GROQ_MODEL
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 groq_client = None
 
@@ -70,13 +77,14 @@ def evaluate_with_rag(
     if not groq_client or not context_text.strip():
         # Fallback heuristic calculation if no LLM or no retrieved chunks
         return {
-            "faithfulness_score": 75.0,
-            "answer_relevance": 80.0,
-            "conceptual_accuracy": 75.0,
-            "key_points_covered": ["Response evaluated using baseline heuristics."],
+            "faithfulness_score": 0.0,
+            "answer_relevance": 0.0,
+            "conceptual_accuracy": 0.0,
+            "key_points_covered": [],
             "missing_points": [],
             "citations": [],
-            "conceptual_feedback": "Answer recorded. (RAG knowledge base query returned default context).",
+            "conceptual_feedback": "Automatic evaluation unavailable. Teacher review required.",
+            "needs_review": True,
         }
 
     ref_str = f"\nStandard Reference Answer: {model_reference_answer}" if model_reference_answer else ""
@@ -123,7 +131,7 @@ Return ONLY JSON, with no markdown fences or other text.
 
     try:
         completion = groq_client.chat.completions.create(
-            model="qwen/qwen3.8-27b",
+            model=GROQ_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=800,
@@ -155,11 +163,12 @@ Return ONLY JSON, with no markdown fences or other text.
     except Exception as e:
         print(f"[RAG Evaluator] Groq evaluation error: {e}")
         return {
-            "faithfulness_score": 70.0,
-            "answer_relevance": 75.0,
-            "conceptual_accuracy": 70.0,
-            "key_points_covered": ["Answer processed (fallback evaluation)."],
+            "faithfulness_score": 0.0,
+            "answer_relevance": 0.0,
+            "conceptual_accuracy": 0.0,
+            "key_points_covered": [],
             "missing_points": [],
             "citations": [],
-            "conceptual_feedback": "Candidate response evaluated.",
+            "conceptual_feedback": "Automatic evaluation unavailable. Teacher review required.",
+            "needs_review": True,
         }

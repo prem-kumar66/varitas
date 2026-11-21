@@ -14,6 +14,7 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 )
+from scoring import compute_overall
 
 # Dark luxury palette
 GOLD = HexColor("#C9A961")
@@ -117,7 +118,7 @@ def generate_report(session: dict, answers: list) -> bytes:
     real_answers = [a for a in answers if not a.get("is_calibration")]
     avg_auth = sum(a.get("authenticity_score", 100.0) for a in real_answers) / max(1, len(real_answers))
     avg_acc = sum(a.get("accuracy_score", 0.0) for a in real_answers) / max(1, len(real_answers))
-    avg_overall = sum(a.get("overall_score", (avg_acc * 0.65 + avg_auth * 0.35)) for a in real_answers) / max(1, len(real_answers))
+    avg_overall = sum(a.get("overall_score", compute_overall(avg_acc, avg_auth)) for a in real_answers) / max(1, len(real_answers))
     avg_risk = 100 - avg_auth
     risk_color = _risk_color(avg_risk)
     tier = _risk_label(avg_risk)
@@ -175,7 +176,9 @@ def generate_report(session: dict, answers: list) -> bytes:
         ans_mode = (a.get("mode") or "oral").upper()
 
         # Q&A Header
-        story.append(Paragraph(f"Q{i}. {a['question']} [{ans_mode} MODE]", s["h3"]))
+        q_text = (a.get('question') or '').strip() or '(Question not recorded — set question text in Teacher Portal before exam)'
+        story.append(Paragraph(f"Q{i}. [{ans_mode} MODE]", s["h3"]))
+        story.append(Paragraph(f'<b>Question:</b> {q_text}', s["body"]))
         story.append(Paragraph(f'<b>Student Answer:</b> "{a["transcript"]}"', s["quote"]))
 
         ref_ans = a.get("reference_answer")

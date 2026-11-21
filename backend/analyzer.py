@@ -16,6 +16,7 @@ from typing import List, Dict, Optional, Tuple
 from collections import deque
 
 from perplexity import perplexity, perplexity_to_signal
+from validator import is_non_answer
 
 
 # ---------- Language-specific lexicons ----------
@@ -387,6 +388,19 @@ class CognitiveAnalyzer:
                 + scores.fluency * 0.35  # AI Perplexity weight
                 + scores.polish * 0.25  # LLM phrase tell weight
             )
+            if is_non_answer(seg.transcript, seg.question):
+                risk = max(50.0, risk)
+                pacing_exp = scores.explanations.get("pacing", "")
+                scores.explanations["pacing"] = (
+                    pacing_exp + " [Flagged: non-meaningful answer; authenticity capped at 50]"
+                ).strip()
+                scores.evidence.setdefault("pacing", []).append(
+                    Evidence(
+                        span=seg.transcript[:30],
+                        reason="Non-answer: too short or lacks question vocabulary",
+                        weight=50.0,
+                    )
+                )
         else:
             risk = (
                 scores.delay * self.WEIGHTS["delay"]
@@ -400,6 +414,9 @@ class CognitiveAnalyzer:
         self.history.append(seg)
         return scores, min(100.0, risk)
 
-    def authenticity_score(self, risk: float) -> float:
-        return max(0.0, 100.0 - risk)
+    def authenticity_score(self, risk: float, is_non_answer: bool = False) -> float:
+        score = max(0.0, 100.0 - risk)
+        if is_non_answer:
+            return min(50.0, score)
+        return score
 

@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { getTeacherAuthHeaders } from "@/lib/auth";
 import { 
   ShieldCheck, 
   Users, 
@@ -76,7 +77,7 @@ export default function AdminDashboardPage() {
   const fetchSessions = useCallback(() => {
     setLoading(true);
     const deptParam = selectedDept === "all" ? "" : `?department=${encodeURIComponent(selectedDept)}`;
-    fetch(`${BACKEND_HTTP}/api/sessions${deptParam}`)
+    fetch(`${BACKEND_HTTP}/api/sessions${deptParam}`, { headers: getTeacherAuthHeaders() })
       .then((r) => r.json())
       .then((d) => {
         setSessions(d.sessions || []);
@@ -87,7 +88,7 @@ export default function AdminDashboardPage() {
 
   const fetchQueries = useCallback(() => {
     setQueriesLoading(true);
-    fetch(`${BACKEND_HTTP}/api/faculty/queries`)
+    fetch(`${BACKEND_HTTP}/api/faculty/queries`, { headers: getTeacherAuthHeaders() })
       .then((r) => r.json())
       .then((d) => {
         setQueries(d.queries || []);
@@ -104,7 +105,7 @@ export default function AdminDashboardPage() {
     try {
       const res = await fetch(`${BACKEND_HTTP}/api/faculty/query/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getTeacherAuthHeaders() },
         body: JSON.stringify({ status })
       });
       if (res.ok) {

@@ -14,8 +14,18 @@ veritas.db
 # Ignore environment files containing secrets
 .env
 .env.*
+.env.local
+*.env
+*.env.*
+*.env.local
 backend/.env
+backend/.env.*
+backend/.env.local
+frontend/.env
+frontend/.env.*
 frontend/.env.local
+*.pem
+*.key
 
 # Node / Next build outputs
 node_modules/

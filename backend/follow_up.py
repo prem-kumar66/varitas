@@ -6,6 +6,7 @@ Supports multiple languages — uses Groq llama-3.1-8b which is multilingual.
 import os
 from typing import Optional
 from groq import Groq
+from config import GROQ_MODEL
 
 
 SYSTEM_PROMPTS = {
@@ -96,7 +97,7 @@ class FollowUpGenerator:
 
         try:
             response = self.client.chat.completions.create(
-                model="qwen/qwen3.8-27b",
+                model=GROQ_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content":

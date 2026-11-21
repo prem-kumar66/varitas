@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { TrendingUp, Award, ShieldCheck, Target } from "lucide-react";
 import { motion } from "framer-motion";
+import { getTeacherAuthHeaders } from "@/lib/auth";
 
 const BACKEND_HTTP = process.env.NEXT_PUBLIC_BACKEND_HTTP || "http://localhost:8000";
 
@@ -10,7 +11,7 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${BACKEND_HTTP}/api/sessions`)
+    fetch(`${BACKEND_HTTP}/api/sessions`, { headers: getTeacherAuthHeaders() })
       .then((r) => r.json())
       .then((d) => {
         setSessions(d.sessions || []);

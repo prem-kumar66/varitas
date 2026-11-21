@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import { getTeacherAuthHeaders } from "@/lib/auth";
 import { 
   Settings, 
   User, 
@@ -59,16 +60,50 @@ export default function TeacherSettingsPage() {
   const [strictnessLevel, setStrictnessLevel] = useState("Standard");
   const [prefSuccess, setPrefSuccess] = useState(false);
 
+  const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+
   useEffect(() => {
+    // Also fetch the latest profile from the backend on load
+    const fetchProfile = async (userEmail: string) => {
+      try {
+        const res = await fetch(`${BACKEND_HTTP}/api/faculty/profile?email=${encodeURIComponent(userEmail)}`, {
+          headers: getTeacherAuthHeaders()
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.profile) {
+            setName(data.profile.name || name);
+            setPhone(data.profile.phone || phone);
+            setDesignation(data.profile.designation || designation);
+            // Update local storage so the sidebar reflects changes
+            const authStr = localStorage.getItem("veritas_teacher_auth");
+            if (authStr) {
+              const auth = JSON.parse(authStr);
+              auth.name = data.profile.name;
+              auth.teacherName = data.profile.name;
+              auth.phone = data.profile.phone;
+              auth.designation = data.profile.designation;
+              localStorage.setItem("veritas_teacher_auth", JSON.stringify(auth));
+            }
+          }
+        }
+      } catch (e) {}
+    };
+
     const authStr = localStorage.getItem("veritas_teacher_auth");
     if (authStr) {
       try {
         const auth = JSON.parse(authStr);
         setName(auth.teacherName || auth.name || "");
-        setEmail(auth.email || auth.teacherId || "");
+        const userEmail = auth.email || auth.teacherId || "";
+        setEmail(userEmail);
         setFacultyDept(auth.department || "cse");
         setDesignation(auth.designation || auth.role || "Faculty Evaluator");
         setPhone(auth.phone || "");
+        
+        if (userEmail) fetchProfile(userEmail);
       } catch (e) {}
     }
 
@@ -82,6 +117,48 @@ export default function TeacherSettingsPage() {
       } catch (e) {}
     }
   }, []);
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileError(null);
+    setProfileSuccess(null);
+    setIsUpdatingProfile(true);
+
+    try {
+      const res = await fetch(`${BACKEND_HTTP}/api/faculty/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...getTeacherAuthHeaders() },
+        body: JSON.stringify({
+          email,
+          name,
+          phone,
+          designation
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to update profile");
+      }
+      setProfileSuccess("Profile details updated successfully!");
+      
+      // Update local storage
+      const authStr = localStorage.getItem("veritas_teacher_auth");
+      if (authStr) {
+        const auth = JSON.parse(authStr);
+        auth.name = name;
+        auth.teacherName = name;
+        auth.phone = phone;
+        auth.designation = designation;
+        localStorage.setItem("veritas_teacher_auth", JSON.stringify(auth));
+      }
+      
+      setTimeout(() => setProfileSuccess(null), 3000);
+    } catch (err: any) {
+      setProfileError(err.message || "Failed to update profile");
+    } finally {
+      setIsUpdatingProfile(false);
+    }
+  };
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,7 +179,7 @@ export default function TeacherSettingsPage() {
     try {
       const res = await fetch(`${BACKEND_HTTP}/api/faculty/update-passcode`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getTeacherAuthHeaders() },
         body: JSON.stringify({
           email,
           current_passcode: currentPasscode,
@@ -161,47 +238,82 @@ export default function TeacherSettingsPage() {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          <div>
-            <label className="font-semibold text-[#555555] block mb-1">Full Name</label>
-            <input 
-              type="text" 
-              value={name} 
-              disabled 
-              className="w-full bg-[#F8F8F8] border border-[#E5E5E5] rounded-xl px-3 py-2 text-[#555555] font-medium"
-            />
+        <form onSubmit={handleUpdateProfile} className="space-y-4">
+          {profileError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-[#C8102E] flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{profileError}</span>
+            </div>
+          )}
+
+          {profileSuccess && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-700 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{profileSuccess}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div>
+              <label className="font-semibold text-[#555555] block mb-1">Full Name</label>
+              <input 
+                type="text" 
+                value={name} 
+                onChange={(e) => setName(e.target.value)}
+                className="w-full bg-white border border-[#E5E5E5] rounded-xl px-3 py-2 text-[#171717] focus:outline-none focus:border-[#C8102E]"
+              />
+            </div>
+            <div>
+              <label className="font-semibold text-[#555555] block mb-1">Official College Email</label>
+              <input 
+                type="text" 
+                value={email} 
+                disabled 
+                className="w-full bg-[#F8F8F8] border border-[#E5E5E5] rounded-xl px-3 py-2 text-[#555555] font-mono cursor-not-allowed"
+              />
+            </div>
+            <div>
+              <label className="font-semibold text-[#555555] block mb-1">Phone Number</label>
+              <input 
+                type="text" 
+                value={phone} 
+                onChange={(e) => setPhone(e.target.value)}
+                className="w-full bg-white border border-[#E5E5E5] rounded-xl px-3 py-2 text-[#171717] focus:outline-none focus:border-[#C8102E]"
+              />
+            </div>
+            <div>
+              <label className="font-semibold text-[#555555] block mb-1">Designation</label>
+              <input 
+                type="text" 
+                value={designation} 
+                onChange={(e) => setDesignation(e.target.value)}
+                className="w-full bg-white border border-[#E5E5E5] rounded-xl px-3 py-2 text-[#171717] focus:outline-none focus:border-[#C8102E]"
+              />
+            </div>
+            <div>
+              <label className="font-semibold text-[#555555] block mb-1">Assigned Department</label>
+              <input 
+                type="text" 
+                value={DEPT_LABELS[facultyDept] || facultyDept.toUpperCase()} 
+                disabled 
+                className="w-full bg-[#F8F8F8] border border-[#E5E5E5] rounded-xl px-3 py-2 text-[#555555] font-medium cursor-not-allowed"
+              />
+            </div>
           </div>
-          <div>
-            <label className="font-semibold text-[#555555] block mb-1">Official College Email</label>
-            <input 
-              type="text" 
-              value={email} 
-              disabled 
-              className="w-full bg-[#F8F8F8] border border-[#E5E5E5] rounded-xl px-3 py-2 text-[#555555] font-mono"
-            />
+          
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-[11px] text-[#777777] italic">
+              To change department, please submit a request through the Domain Queries portal.
+            </p>
+            <button
+              type="submit"
+              disabled={isUpdatingProfile}
+              className="flex items-center gap-2 bg-[#171717] hover:bg-[#2e2e2e] text-white text-xs font-bold px-4 py-2 rounded-xl transition disabled:opacity-50"
+            >
+              <Save className="w-4 h-4" /> {isUpdatingProfile ? "Saving..." : "Save Profile Details"}
+            </button>
           </div>
-          <div>
-            <label className="font-semibold text-[#555555] block mb-1">Assigned Department</label>
-            <input 
-              type="text" 
-              value={DEPT_LABELS[facultyDept] || facultyDept.toUpperCase()} 
-              disabled 
-              className="w-full bg-[#F8F8F8] border border-[#E5E5E5] rounded-xl px-3 py-2 text-[#555555] font-medium"
-            />
-          </div>
-          <div>
-            <label className="font-semibold text-[#555555] block mb-1">Designation</label>
-            <input 
-              type="text" 
-              value={designation} 
-              disabled 
-              className="w-full bg-[#F8F8F8] border border-[#E5E5E5] rounded-xl px-3 py-2 text-[#555555] font-medium"
-            />
-          </div>
-        </div>
-        <p className="text-[11px] text-[#777777] italic">
-          To change department or official designation, please submit a request through the Domain Queries portal.
-        </p>
+        </form>
       </div>
 
       {/* Assessment Default Preferences */}
